@@ -1,4 +1,10 @@
-# Deps for the Jetson Nano (edge) side — Phases 0-5.
-# Owned by the Nano-side contributor; fill in as that work proceeds
-# (e.g. opencv-python, jetson-inference / TensorRT bindings, Jetson.GPIO,
-# requests, pydantic).
+# Dependencies for the Jetson Nano (edge) side — Phases 0-5.
+# Cross-platform core dependencies:
+pydantic>=2.6
+requests>=2.31
+numpy>=1.24
+opencv-python>=4.8
+
+# Jetson Nano hardware-specific packages (pre-installed in JetPack or via apt):
+# Jetson.GPIO>=2.0.0
+# jetson-inference

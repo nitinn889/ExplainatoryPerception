@@ -9,16 +9,43 @@ off without re-deriving context.
 
 - **Nano / edge, Phases 0-5** (camera, SSD-MobileNet-V2 detection, scene
   graph, perception-action loop, motor control, importance scoring, event
-  client): **not yet implemented.** Files exist only as stubs with
-  docstring headers describing responsibility — see `nano/*.py`. This is
-  the next work to do.
-- **Laptop / fog, Phases 6-10** (captioning, embeddings, memory store,
+  client, event server, main loop): **implemented, tested, and passing.**
+  Designed with dual hardware/host capability so code runs directly on standard
+  systems and ports without modification onto the physical Jetson Nano.
+- **Laptop / fog, Phases 6-8** (captioning, embeddings, memory store,
   compression, contradiction detection, RAG query answering, evaluation
   tooling): **implemented and tested**, described below.
 
-## What's built and passing (laptop side, Phases 6-8)
+## What's built and passing (Phases 0-5 Edge & Phases 6-8 Fog)
 
-Run `pytest tests/` from the repo root — 11 tests pass.
+Run `pytest` from the repo root — 20 tests pass.
+
+### Edge Pipeline (Nano, Phases 0-5)
+- **`nano/motor_control.py`** (Phase 0) — L298N motor driver using fixed-duration
+  short pulses (default 150ms). Automatically detects `Jetson.GPIO` and falls back
+  to a mock driver logging pulses when running on host systems.
+- **`nano/camera.py`** (Phase 0/1) — Unified camera interface supporting CSI
+  (`nvarguscamerasrc` GStreamer pipeline), USB (`v4l2`), and synthetic frames
+  with configurable mock objects for headless testing.
+- **`nano/detector.py`** (Phase 1) — SSD-MobileNet-V2 inference wrapper (no YOLO).
+  Supports Jetson TensorRT (`jetson.inference.detectNet`), OpenCV DNN, and
+  simulation backends. Normalized 0-1 bbox contract, plus FPS benchmarking helper.
+- **`nano/scene_graph.py`** (Phase 2) — Converts detections into spatial triples
+  (`ON`, `LEFT OF`, `RIGHT OF`, `BEHIND`) using geometric rules and surfaces,
+  guaranteeing movable subjects are ordered first.
+- **`nano/perception_action.py`** (Phase 3) — Core novelty perception-action state
+  machine (`PATROL -> PARTIAL -> ADJUST -> CONFIRM -> LOGGED`). Implements
+  left/right/bottom-clip, too-far signals, largest-area prioritization, 3-frame
+  consecutive stabilization, and 7-second timeout guardrails.
+- **`nano/importance_scoring.py`** (Phase 4) — Filters redundant repetitive frames;
+  only triggers upstream events when an object is newly observed, moved, changed
+  relationship, significantly displaced, or timed out.
+- **`laptop/event_server.py` & `nano/event_client.py`** (Phase 5) — FastAPI receiver
+  at `POST /event` and robust HTTP client transmitting `shared.event_schema.Event`
+  objects over LAN/Wi-Fi with logging and healthcheck endpoints.
+- **`nano/main_loop.py`** — Orchestrator tying camera -> detector -> perception-action
+  loop -> scene graph -> importance filter -> fog event client, with `--benchmark`
+  and `--simulate` scenarios for one-command verification.
 
 - **`shared/event_schema.py`** — the single source of truth JSON event
   contract (pydantic `Event`, `BBox`, `EventType`). Both Nano and laptop
