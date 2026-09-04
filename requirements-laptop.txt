@@ -1,0 +1,7 @@
+# Deps for the companion laptop (fog) side — Phases 5-10.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+sentence-transformers>=2.6
+chromadb>=0.4.24
+requests>=2.31

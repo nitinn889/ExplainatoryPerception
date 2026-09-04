@@ -1,0 +1,4 @@
+# Deps for the Jetson Nano (edge) side — Phases 0-5.
+# Owned by the Nano-side contributor; fill in as that work proceeds
+# (e.g. opencv-python, jetson-inference / TensorRT bindings, Jetson.GPIO,
+# requests, pydantic).

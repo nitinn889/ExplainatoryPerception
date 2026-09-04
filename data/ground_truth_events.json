@@ -1,0 +1,4 @@
+{
+  "_note": "Template only — pending real lab recordings from the physical robot (spec Phase 9: 15-20 sessions, ~2000-3000 frames, ~10 object categories, ~50 staged movement events). Each real entry should follow shared.event_schema.Event's shape plus a human-verified label.",
+  "events": []
+}
