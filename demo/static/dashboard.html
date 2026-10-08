@@ -124,6 +124,27 @@
     font: 600 13px inherit; cursor: pointer;
   }
   .ask button:disabled { opacity: .5; cursor: default; }
+  .ask button.mic {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    padding: 9px 12px; font-size: 15px; line-height: 1;
+  }
+  .ask button.mic:hover:not(:disabled) { border-color: var(--accent); }
+  .ask button.mic.on {
+    background: var(--bad); color: #fff; border-color: var(--bad);
+    animation: mic-pulse 1.3s ease-in-out infinite;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 95, .55); }
+    50%      { box-shadow: 0 0 0 7px rgba(255, 90, 95, 0); }
+  }
+
+  /* voice row */
+  .voice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 0 12px 10px; }
+  .voice label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+  .voice input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  .vstatus { font-family: var(--mono); font-size: 10.5px; color: var(--muted); min-width: 0; }
+  .vstatus.live { color: var(--bad); }
+  .vstatus.say { color: var(--accent); }
   .ctrl { display: flex; gap: 7px; flex-wrap: wrap; padding: 0 12px 12px; }
   .ctrl button { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
   .ctrl button:hover { border-color: var(--accent); }
@@ -144,7 +165,7 @@
 <header>
   <div>
     <h1>Episodic Perception &mdash; live demo</h1>
-    <div class="sub">Edge: camera &rarr; detect &rarr; scene graph &rarr; perception&ndash;action loop &rarr; importance filter &nbsp;|&nbsp; Fog: caption &rarr; embed &rarr; vector memory &rarr; RAG</div>
+    <div class="sub">Edge: camera &rarr; detect &rarr; scene graph &rarr; perception&ndash;action loop &rarr; importance filter &nbsp;|&nbsp; Fog: caption &rarr; embed &rarr; vector memory &rarr; RAG &nbsp;|&nbsp; Ask by typing or by voice</div>
   </div>
   <div class="badges">
     <span class="badge" id="b-link">link <b>connecting…</b></span>
@@ -203,8 +224,13 @@
       <h2>Ask the robot <span class="tag">RAG over episodic memory</span></h2>
       <form class="ask" id="ask-form">
         <input id="q" placeholder="where is the bottle?" autocomplete="off" />
+        <button type="button" class="mic" id="mic-btn" title="Click to talk, click again to stop">&#127908;</button>
         <button type="submit" id="ask-btn">Ask</button>
       </form>
+      <div class="voice" id="voice">
+        <label><input type="checkbox" id="speak-toggle" checked /> &#128266; speak answers</label>
+        <span class="vstatus" id="voice-status"></span>
+      </div>
       <div class="suggest" id="suggest"></div>
       <div class="answer" id="answer"></div>
     </div>
@@ -214,6 +240,7 @@
 <footer>
   Boxes are real projections, not an animation &mdash; when the loop pulses <code>turn_right</code>, the box moves because the camera turned.
   The episode counter rises more slowly than the frame counter: that gap is the importance filter plus memory compression doing their job.
+  Voice is an added input, not a different system: a spoken question goes through the same retrieval as a typed one, and the panel always shows the full grounded answer the robot is reading from.
 </footer>
 
 <script>
@@ -496,6 +523,10 @@
       (eps ? `<div class="eplist" style="margin-top:8px;border-top:1px solid var(--line)">${eps}</div>` : "");
   }
 
+  function renderSpoken(text) {
+    $("answer").innerHTML = `<div class="txt">${esc(text)}</div>`;
+  }
+
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   /* ----------------------------------------------------------- transport */
@@ -544,6 +575,113 @@
     try { renderFog((await (await fetch("/state")).json()).snapshot); } catch (_) {}
   }
 
+  /* --------------------------------------------------------------- voice */
+  /* Speech recognition and synthesis are the browser's (Web Speech API);
+     what an utterance *means* is decided server-side by laptop/voice.py via
+     POST /voice, so a spoken "pause" and the Pause button run the same code.
+     Everything here is additive: with no microphone, no permission or no
+     support, the typed path below is untouched and fully functional. */
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const synth = window.speechSynthesis || null;
+  let recognition = null;
+  let listening = false;
+
+  const vstatus = (text, cls) => {
+    const el = $("voice-status");
+    el.textContent = text || "";
+    el.className = "vstatus" + (cls ? " " + cls : "");
+  };
+
+  function speak(text) {
+    if (!synth || !text || !$("speak-toggle").checked) return;
+    // Drop anything still queued: the latest answer is the relevant one.
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.02;
+    utterance.onstart = () => vstatus("speaking…", "say");
+    utterance.onend = () => { if (!listening) vstatus(""); };
+    synth.speak(utterance);
+  }
+
+  async function sendUtterance(transcript) {
+    $("q").value = transcript;
+    vstatus(`heard: “${transcript}”`);
+    $("answer").innerHTML = '<div class="txt" style="color:var(--muted)">retrieving…</div>';
+    try {
+      const res = await fetch("/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: transcript }),
+      });
+      const data = await res.json();
+      // A question comes back as a full query result, so the panel renders
+      // exactly as it does for a typed question; a command only has a line.
+      if (data.kind === "question") renderAnswer(data);
+      else renderSpoken(data.spoken);
+      speak(data.spoken);
+      refreshState();
+    } catch (e) {
+      $("answer").innerHTML = `<div class="txt" style="color:var(--bad)">voice request failed: ${esc(e)}</div>`;
+    }
+  }
+
+  function setupRecognition() {
+    const rec = new SpeechRec();
+    rec.lang = "en-US";
+    rec.interimResults = true;      // show words as they land, for the audience
+    rec.continuous = false;         // one question per press
+    rec.maxAlternatives = 1;
+
+    rec.onstart = () => {
+      listening = true;
+      $("mic-btn").classList.add("on");
+      vstatus("listening…", "live");
+    };
+    rec.onresult = (ev) => {
+      let interim = "", final = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const chunk = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) final += chunk; else interim += chunk;
+      }
+      if (interim) { $("q").value = interim; vstatus(`listening… “${interim.trim()}”`, "live"); }
+      if (final.trim()) sendUtterance(final.trim());
+    };
+    rec.onerror = (ev) => {
+      const why = ev.error === "not-allowed" || ev.error === "service-not-allowed"
+        ? "microphone permission denied — typing still works"
+        : ev.error === "no-speech" ? "didn't hear anything" : `speech error: ${ev.error}`;
+      vstatus(why);
+    };
+    rec.onend = () => {
+      listening = false;
+      $("mic-btn").classList.remove("on");
+      if ($("voice-status").classList.contains("live")) vstatus("");
+    };
+    return rec;
+  }
+
+  function initVoice() {
+    if (!synth) $("speak-toggle").disabled = true;
+    if (!SpeechRec) {
+      $("mic-btn").disabled = true;
+      $("mic-btn").title = "Speech recognition needs Chrome or Edge";
+      vstatus(synth
+        ? "voice input needs Chrome or Edge — typing works everywhere, answers are still spoken"
+        : "this browser has no Web Speech support — typing works everywhere");
+      return;
+    }
+    $("mic-btn").addEventListener("click", () => {
+      if (listening) { recognition.stop(); return; }
+      // Stop talking before listening, or the robot transcribes itself.
+      if (synth) synth.cancel();
+      try {
+        recognition = recognition || setupRecognition();
+        recognition.start();
+      } catch (_) { /* start() throws if already running; ignore */ }
+    });
+    vstatus("click the mic and ask, or say “pause” / “start patrol”");
+  }
+
   /* -------------------------------------------------------------- wiring */
   $("ask-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -552,7 +690,9 @@
     $("ask-btn").disabled = true;
     $("answer").innerHTML = '<div class="txt" style="color:var(--muted)">retrieving…</div>';
     try {
-      renderAnswer(await (await fetch(`/query?q=${encodeURIComponent(q)}&k=4`)).json());
+      const data = await (await fetch(`/query?q=${encodeURIComponent(q)}&k=4`)).json();
+      renderAnswer(data);
+      speak(data.spoken);
     } catch (e) {
       $("answer").innerHTML = `<div class="txt" style="color:var(--bad)">query failed: ${esc(e)}</div>`;
     }
@@ -574,6 +714,7 @@
   });
 
   renderFsm(); renderEdgeStats(); drawCamera(); drawMap();
+  initVoice();
   connect();
   setInterval(refreshState, 4000);
 })();

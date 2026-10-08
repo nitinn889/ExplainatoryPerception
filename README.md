@@ -18,6 +18,14 @@ Open <http://localhost:8080>. A simulated robot patrols a three-station lab,
 recovers partially-visible objects by repositioning, logs episodes, and answers
 questions about what it has seen — the whole concept, end to end, in a browser.
 
+Questions can be **typed or spoken**. Click the microphone in *Ask the robot*
+and say "where is the bottle?" and the robot answers out loud; spoken control
+phrases ("pause", "start patrol") drive the same actions as the buttons. The
+dashboard is unchanged by this — it still shows the full grounded answer and
+the episodes it was built from, and everything works with the keyboard alone.
+Voice needs Chrome or Edge; see [`demo/README.md`](demo/README.md) for what it
+does not do.
+
 For the higher-fidelity Webots version (rendered camera frames, rigid-body
 physics, optionally the real SSD-MobileNet-V2 weights in the loop):
 
@@ -77,6 +85,9 @@ Or run the query API: `uvicorn laptop.api:app --reload` then `GET /query?q=...`.
       in `docs/evaluation_results.md` are still pending: they require 15-20
       real lab recordings from the physical robot, which needs Phases 0-5
       (Nano side) finished and integrated first.
+- [x] Voice interface — ask by speaking and get a spoken reply, in addition to
+      (never instead of) the dashboard. Routing and spoken phrasing live in
+      `laptop/voice.py`; speech recognition and synthesis are the browser's.
 - [x] Phase 10 — Polish, docs, demo prep — two runnable live demos
       (`demo/` in a browser, `webots/` in the Webots simulator), both driving
       the real `nano/` and `laptop/` modules end to end. See

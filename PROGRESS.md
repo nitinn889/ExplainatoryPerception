@@ -145,6 +145,46 @@ All additive; existing behaviour and tests unchanged unless noted.
   each incoming event (contradiction → caption → compression → store). The
   modules existed and were tested individually; nothing ran them as a pipeline.
 
+## Voice interface (added after the demo)
+
+Asking by speaking and being answered out loud, **added to** the dashboard
+rather than replacing any of it. Every existing path — the typed box, the
+suggestion chips, the control buttons, the whole display — is unchanged and
+still works with no microphone at all.
+
+- **`laptop/voice.py`** — new, and the only new module. Two pure functions:
+  - `route_utterance(text)` decides whether an utterance is a control command
+    ("pause", "start patrol") or a question for episodic memory. Question
+    shape is checked *first*, because plain keyword matching sends "did
+    anything move?" to the move-the-bottle command instead of to retrieval.
+  - `spoken_answer(result)` re-phrases a `rag_query` result for being read
+    aloud: no bulleted "other observations" list, no `06:20:06` timestamps,
+    locations as words ("lab desk 3", not `lab_desk_3`), times as "about four
+    minutes ago". It re-orders and re-words the retrieved episodes' own text
+    and never adds to it, so the spoken answer carries the same
+    zero-hallucination guarantee as the displayed one.
+- **`demo/server.py`** — new `POST /voice`, which takes a transcript, routes
+  it, and returns either a control result or a full query result, each with a
+  `spoken` string. The control logic moved out of the `/control/{action}`
+  handler into `_apply_control` so a spoken "pause" and the Pause button
+  cannot drift apart. `GET /query` and `laptop/api.py` now also return
+  `spoken`, so a *typed* question can be read aloud too.
+- **`demo/static/dashboard.html`** — a microphone button next to Ask, a "speak
+  answers" toggle, and a status line showing what was heard. Recognition and
+  synthesis are the browser's Web Speech API; no new Python dependency, and
+  nothing to install before a presentation.
+- **`tests/test_voice.py`** — 43 tests: routing (including the "did anything
+  move?" trap), relative-time phrasing, clock skew between edge and fog,
+  unparseable timestamps, and the `/voice` endpoint for questions, commands,
+  commands with no sim attached, and silence.
+
+Deliberately **not** done: on-device speech. Chrome's recognition is a cloud
+service, so the microphone needs a network even though the rest of the demo
+does not. Running Vosk or whisper.cpp on the Nano would fix that and would also
+be the right answer for the physical robot, which has no browser. The phrasing
+and routing in `laptop/voice.py` are already independent of the browser, so
+that work is a new front end for them, not a rewrite.
+
 ## What's explicitly NOT done, and why
 
 - **Phase 9's real numbers are not filled in.** `docs/evaluation_results.md`

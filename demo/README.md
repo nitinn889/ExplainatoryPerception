@@ -52,7 +52,12 @@ Useful flags: `--fps 6` (simulated detector frame rate), `--time-scale 0.2`
   scene-graph triples, the event JSON that crossed the wire, the caption, and
   whether it opened a new episode or extended an existing one.
 * **Memory** — stored episodes, and the counters the report needs.
-* **Ask the robot** — Phase 8 RAG over the episodic memory.
+* **Ask the robot** — Phase 8 RAG over the episodic memory, by keyboard or by
+  voice. The microphone button transcribes what you say in the browser and
+  POSTs the text to `/voice`, which decides whether it was a question for
+  memory or a control command (`laptop/voice.py`), then speaks the answer
+  back. The panel below still shows the full grounded answer and the retrieved
+  episodes, so the audience can see what the spoken sentence came from.
 
 ### The five-minute script
 
@@ -75,6 +80,10 @@ Useful flags: `--fps 6` (simulated detector frame rate), `--time-scale 0.2`
    row per sighting.
 6. **Ask it something.** "where is the bottle?" → the latest location, with the
    retrieved episodes and the measured latency.
+7. **Ask it out loud.** Click the microphone and say the same question. The
+   transcript appears in the box, the same retrieval runs, and the answer is
+   read back. Then say "pause" — a spoken command runs the same action as the
+   Pause button, because `/voice` and `/control` share one code path.
 
 ---
 
@@ -182,6 +191,19 @@ Things this demo does not do, so nothing in a report has to over-claim:
   match "water bottle". The dashboard shows which backend is live, and
   `tests/test_memory_store.py` skips the cross-wording test rather than
   pretending the fallback passes it.
+* **Voice input is Chrome and Edge only, and not local.** Recognition uses the
+  browser's Web Speech API. Firefox does not implement it, so the microphone
+  button is disabled there with a note — typing is unaffected, and answers are
+  still spoken, because speech *synthesis* is supported everywhere. Chrome's
+  recognition is also a cloud service: the audio leaves the machine, so the
+  "works on a projector with no network" claim covers the dashboard and the
+  typed path, not the microphone. On-device recognition on the Nano itself
+  (Vosk, whisper.cpp) would be the fix, and is not built.
+* **Spoken commands are a fixed phrase table, not language understanding.**
+  `laptop/voice.py` matches a handful of phrasings per action and routes
+  anything question-shaped to retrieval instead. "Stop what you are doing"
+  works; a paraphrase outside the table becomes a question and retrieves
+  nothing useful rather than failing loudly.
 * **Answer synthesis is extractive by default.** `extractive_synthesize` only
   rearranges the retrieved episodes' own text, so it cannot hallucinate — and
   it cannot write nicely either. Set `ANTHROPIC_API_KEY` to switch

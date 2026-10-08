@@ -34,6 +34,7 @@ from laptop import embeddings
 from laptop.captioning import caption_from_event
 from laptop.compression import Episode, EpisodeCompressor
 from laptop.contradiction import LocationTracker
+from laptop.voice import attach_spoken
 from shared.event_schema import Event, EventType
 
 logger = logging.getLogger("demo.fog_pipeline")
@@ -341,7 +342,9 @@ class FogPipeline:
         self.query_latencies_ms.append(latency_ms)
         result["latency_ms"] = round(latency_ms, 1)
         result["embedding_backend"] = embeddings.active_backend()
-        return result
+        # Both the typed and the spoken path come through here, so the
+        # read-aloud phrasing is always available to whoever asked.
+        return attach_spoken(result)
 
     # -- introspection -----------------------------------------------------
     def snapshot(self) -> dict[str, Any]:

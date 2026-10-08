@@ -13,6 +13,7 @@ from fastapi import FastAPI
 
 from laptop.memory_store import MemoryStore
 from laptop.rag_query import answer_question
+from laptop.voice import attach_spoken
 
 app = FastAPI(title="Episodic Perception Query API")
 _store = MemoryStore()
@@ -20,7 +21,9 @@ _store = MemoryStore()
 
 @app.get("/query")
 def query(q: str, k: int = 5):
-    return answer_question(q, _store, k=k)
+    """`answer` is the grounded text to display, `spoken` the same facts
+    phrased to be read aloud — see laptop/voice.py."""
+    return attach_spoken(answer_question(q, _store, k=k))
 
 
 def main() -> None:

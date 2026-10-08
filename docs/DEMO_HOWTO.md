@@ -97,6 +97,12 @@ Press `Ctrl+C` in the terminal to stop.
   episodes in memory when you start talking. An empty memory panel is a weak
   opening.
 - Have a terminal visible if you want to show the logs, but you do not need to.
+- **If you plan to use the voice part, use Chrome or Edge**, allow the
+  microphone when the browser asks, and say one question into it before the
+  room fills up — the first use is when permission is requested, and you do not
+  want that dialog on the projector. Check the laptop's output volume too. If
+  anything about the microphone looks shaky, just skip step 8: typing does the
+  same thing.
 
 ---
 
@@ -151,6 +157,21 @@ sighting.
 Point at the latency (single-digit milliseconds) and at the retrieved episodes
 below the answer — the answer is built from those, so it cannot invent
 anything.
+
+**8 — Ask it out loud.** Click the microphone and say *"where is the bottle?"*.
+The words appear in the box as you speak, the same retrieval runs, and the
+robot answers in a voice. Then say *"pause"* — spoken commands run the same
+actions as the buttons.
+
+Two things worth saying while this happens:
+- The spoken sentence is **shorter than the one on screen**, deliberately. The
+  display keeps the full grounded answer with every matching episode and exact
+  timestamps; out loud that is unlistenable, so `laptop/voice.py` re-phrases
+  the same retrieved facts into two or three sentences with relative times. It
+  re-words, it never adds — the panel is right there to check it against.
+- Voice is an **added** input. The dashboard, the typed box and the buttons all
+  work exactly as before, which is the honest answer if someone asks what
+  happens when the microphone fails.
 
 ---
 
@@ -223,6 +244,10 @@ and flat objects break the fixed minimum-height rule.
 | Dashboard loads but nothing moves | The patrol may have finished. Click **Start patrol**, or restart with `--laps 0` to patrol indefinitely (the default). |
 | First run hangs for minutes | sentence-transformers downloading its model (~90 MB) on first use. It is cached after that. Run it once before the lesson. |
 | Webots window is black / very slow | No GPU drivers. Use the browser demo instead — it needs no graphics hardware. |
+| Microphone button is greyed out | You are in Firefox, which has no Web Speech recognition. Use Chrome or Edge. Typing works everywhere. |
+| "microphone permission denied" under the box | Allow the microphone for `localhost` in the browser's site settings and click the mic again. |
+| It hears the question but says nothing | Un-mute the laptop, and check **speak answers** is ticked. |
+| Voice input does nothing offline | Chrome's speech recognition is a cloud service. Without a network, type the question — everything else in the demo runs offline. |
 
 **Have a fallback.** Record the demo beforehand and keep the file on your
 laptop, so a projector or a network problem does not sink the presentation:

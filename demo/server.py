@@ -6,6 +6,7 @@ One process that:
   * receives edge events at  POST /event          (shared.event_schema.Event)
   * receives frame state at  POST /telemetry
   * answers questions at     GET  /query?q=...    (Phase 8 RAG)
+  * handles spoken input at  POST /voice          (transcript -> command or question)
   * pushes everything to the browser over WS /ws
 
 `POST /event` and `GET /health` are the same contract `laptop/event_server.py`
@@ -31,6 +32,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from demo.fog_pipeline import FogPipeline
+from laptop.voice import route_utterance
 from shared.event_schema import Event
 
 logger = logging.getLogger("demo.server")
@@ -187,14 +189,11 @@ def state() -> dict[str, Any]:
     }
 
 
-@app.post("/control/{action}")
-def control(action: str) -> JSONResponse:
-    """Dashboard buttons for the 2D sim (no-ops when driving from Webots)."""
+def _apply_control(action: str) -> tuple[int, dict[str, Any]]:
+    """Run a control action. Shared by the dashboard buttons and /voice so a
+    spoken "pause" and the Pause button cannot drift apart."""
     if agent is None:
-        return JSONResponse(
-            {"status": "unavailable", "detail": "No 2D sim attached; the edge is external."},
-            status_code=409,
-        )
+        return 409, {"status": "unavailable", "detail": "No 2D sim attached; the edge is external."}
 
     if action == "start":
         agent.start()
@@ -204,11 +203,59 @@ def control(action: str) -> JSONResponse:
         agent.resume()
     elif action == "move_bottle":
         if not agent.move_bottle():
-            return JSONResponse({"status": "error", "detail": "no bottle in the world"}, status_code=400)
+            return 400, {"status": "error", "detail": "no bottle in the world"}
     else:
-        return JSONResponse({"status": "error", "detail": f"unknown action {action!r}"}, status_code=400)
+        return 400, {"status": "error", "detail": f"unknown action {action!r}"}
 
-    return JSONResponse({"status": "ok", "running": agent.running, "paused": agent.paused})
+    return 200, {"status": "ok", "running": agent.running, "paused": agent.paused}
+
+
+@app.post("/control/{action}")
+def control(action: str) -> JSONResponse:
+    """Dashboard buttons for the 2D sim (no-ops when driving from Webots)."""
+    code, body = _apply_control(action)
+    return JSONResponse(body, status_code=code)
+
+
+@app.post("/voice")
+def voice(payload: dict[str, Any]) -> JSONResponse:
+    """One spoken utterance, already transcribed by the browser.
+
+    Recognition and synthesis stay in the browser (Web Speech API); the
+    decision of what an utterance *means* lives here, in `laptop.voice`, where
+    it is testable without audio hardware. Every response carries a `spoken`
+    string for the browser to read back.
+    """
+    transcript = str(payload.get("text") or "").strip()
+    routed = route_utterance(transcript)
+    kind = routed["kind"]
+
+    if kind == "empty":
+        return JSONResponse({"kind": kind, "transcript": transcript, "spoken": routed["say"]})
+
+    if kind == "command":
+        code, body = _apply_control(routed["action"])
+        spoken = (
+            routed["say"]
+            if code == 200
+            else "I can't do that from here — the edge is Webots or real hardware."
+        )
+        return JSONResponse(
+            {
+                "kind": kind,
+                "transcript": transcript,
+                "action": routed["action"],
+                "spoken": spoken,
+                "control": body,
+            },
+            status_code=200 if code in (200, 409) else code,
+        )
+
+    result = pipeline.answer(routed["question"], k=4)
+    # Same broadcast /query makes, so every open dashboard shows the answer
+    # to a question that was only ever spoken aloud at one of them.
+    hub.publish({"kind": "answer", "data": result})
+    return JSONResponse({"kind": kind, "transcript": transcript, **result})
 
 
 # --------------------------------------------------------------------------
