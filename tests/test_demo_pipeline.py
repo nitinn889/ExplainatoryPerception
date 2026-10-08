@@ -5,6 +5,7 @@ lexical embedding fallback.
 """
 
 import math
+import pathlib
 
 import pytest
 
@@ -15,6 +16,8 @@ from nano.detector import DetectionResult
 from nano.perception_action import PerceptionActionStateMachine, State
 from nano.scene_graph import SURFACE_CLASSES
 from shared.event_schema import BBox, Event, EventType
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------
@@ -269,3 +272,42 @@ def test_stopwords_keep_shared_function_words_from_dominating():
     """Both captions share "is on the dining table"; only one shares the noun."""
     assert "the" in embeddings._STOPWORDS
     assert embeddings._lexical_embed("the the the the") == [0.0] * embeddings.EMBED_DIM
+
+
+# --------------------------------------------------------------------------
+# The query path must not drag ChromaDB in with it
+# --------------------------------------------------------------------------
+
+def test_rag_query_imports_without_chromadb_installed():
+    """`pip install` without the heavy extras should still answer questions.
+
+    `laptop/memory_store.py` imports chromadb at module level, so a plain
+    `from laptop.memory_store import MemoryStore` in rag_query made /query fail
+    on any machine that skipped the heavy dependencies - even though the store
+    itself falls back cleanly. answer_question only needs something with a
+    .search(query, k), so the import has to stay behind TYPE_CHECKING.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent(
+        """
+        import sys
+
+        class _Blocker:
+            def find_module(self, name, path=None):
+                if name == "chromadb" or name.startswith("chromadb."):
+                    raise ImportError("chromadb is blocked for this test")
+                return None
+
+        sys.meta_path.insert(0, _Blocker())
+        import laptop.rag_query as rq
+        assert "chromadb" not in sys.modules, "rag_query pulled chromadb in"
+        print(rq.extractive_synthesize("where is it?", []))
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, cwd=str(REPO_ROOT)
+    )
+    assert result.returncode == 0, result.stderr

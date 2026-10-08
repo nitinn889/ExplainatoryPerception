@@ -27,8 +27,14 @@ python -m demo.run_demo --no-sim      # dashboard, one terminal
 ```
 
 Both drive the *same* `nano/` and `laptop/` modules the real robot runs.
-[`demo/README.md`](demo/README.md) has the presentation script, the measured
-results and an honest list of what the demo does not do.
+
+- **[`docs/DEMO_HOWTO.md`](docs/DEMO_HOWTO.md)** — step-by-step setup, what to
+  show and in what order, and the questions you will get asked. Start here if
+  you are presenting this.
+- [`demo/README.md`](demo/README.md) — how the two demos differ, and an honest
+  list of what they do not do.
+- [`docs/webots_demo_results.md`](docs/webots_demo_results.md) — measured
+  results.
 
 Split across two contributors:
 - **Nano / edge (Phases 0-5):** `nano/` — camera, SSD-MobileNet-V2 detection,

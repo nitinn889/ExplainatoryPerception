@@ -1,5 +1,9 @@
 # Live demo
 
+**Presenting this to someone? Read
+[`../docs/DEMO_HOWTO.md`](../docs/DEMO_HOWTO.md) instead — it is the
+step-by-step version.**
+
 Two ways to put the whole concept on a screen. They run the **same** edge and
 fog code — the Jetson Nano's own modules from `nano/` and the laptop's from
 `laptop/`. Only the robot's body differs.

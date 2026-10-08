@@ -16,9 +16,14 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from laptop.memory_store import MemoryStore
+if TYPE_CHECKING:  # pragma: no cover - import only for the type hint
+    # Imported lazily: memory_store pulls in ChromaDB, and answer_question only
+    # needs something with a .search(query, k) method. Keeping this out of the
+    # runtime imports lets the query path work against any store - including the
+    # in-process fallback the demo uses when ChromaDB is not installed.
+    from laptop.memory_store import MemoryStore
 
 Synthesizer = Callable[[str, list[dict[str, Any]]], str]
 
@@ -99,7 +104,7 @@ def anthropic_synthesize(question: str, episodes: list[dict[str, Any]]) -> str:
 
 def answer_question(
     question: str,
-    store: MemoryStore,
+    store: "MemoryStore",
     k: int = 5,
     synthesize: Optional[Synthesizer] = None,
 ) -> dict[str, Any]:
