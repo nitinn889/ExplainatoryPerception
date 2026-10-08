@@ -11,8 +11,22 @@ import tempfile
 
 import pytest
 
+from laptop import embeddings
 from laptop.memory_store import MemoryStore
 from shared.event_schema import BBox, Event, EventType
+
+# The cross-wording retrieval test ("blue flask" -> "water bottle") is a test of
+# *semantic* embeddings. laptop/embeddings.py falls back to a lexical embedder
+# when the sentence-transformers model cannot be downloaded, and that fallback
+# genuinely cannot make that match - so skip rather than fail, instead of
+# weakening the assertion into something the fallback happens to pass.
+requires_semantic_embeddings = pytest.mark.skipif(
+    embeddings.active_backend() != embeddings.BACKEND_TRANSFORMER,
+    reason=(
+        "needs the sentence-transformers backend; running on the "
+        f"'{embeddings.active_backend()}' embedder"
+    ),
+)
 
 BBOX = BBox(xmin=0.1, ymin=0.1, xmax=0.5, ymax=0.5)
 
@@ -35,6 +49,7 @@ def store():
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+@requires_semantic_embeddings
 def test_add_and_semantic_search(store):
     store.add_episode(
         make_event(["flask", "laptop"], ["flask LEFT OF laptop"], "lab_desk_3"),

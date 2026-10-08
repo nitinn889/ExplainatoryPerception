@@ -5,3 +5,7 @@ pydantic>=2.6
 sentence-transformers>=2.6
 chromadb>=0.4.24
 requests>=2.31
+
+# The demo dashboard pushes live updates over a WebSocket; uvicorn[standard]
+# already pulls in `websockets`, listed here so the dependency is explicit.
+websockets>=12.0

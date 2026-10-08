@@ -10,14 +10,23 @@ Outputs a list of {class, confidence, bbox (xmin, ymin, xmax, ymax normalized 0-
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 logger = logging.getLogger("nano.detector")
+
+# Where scripts/fetch_ssd_model.sh drops the COCO-pretrained SSD-MobileNet-V2
+# TensorFlow graph. Override with the SSD_MODEL_DIR env var.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MODEL_DIR = _REPO_ROOT / "models" / "ssd_mobilenet_v2_coco"
+TF_WEIGHTS_NAME = "frozen_inference_graph.pb"
+TF_CONFIG_NAME = "ssd_mobilenet_v2_coco_2018_03_29.pbtxt"
 
 # COCO 90 classes often used with SSD-MobileNet
 COCO_CLASSES = [
@@ -35,6 +44,29 @@ COCO_CLASSES = [
     "refrigerator", "blender", "book", "clock", "vase", "scissors", "teddy bear",
     "hair drier", "toothbrush"
 ]
+
+# The 21-class PASCAL VOC label set used by the Caffe MobileNet-SSD weights.
+# Kept separate from COCO_CLASSES: indexing a VOC network's output into the
+# COCO list silently mislabels every detection.
+VOC_CLASSES = [
+    "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus",
+    "car", "cat", "chair", "cow", "dining table", "dog", "horse", "motorbike",
+    "person", "potted plant", "sheep", "sofa", "train", "tv",
+]
+
+
+def default_model_paths() -> Optional[Tuple[str, str]]:
+    """Locate the fetched SSD-MobileNet-V2 TensorFlow graph, if present.
+
+    Returns (weights_path, config_path) or None when the model hasn't been
+    downloaded yet (see scripts/fetch_ssd_model.sh).
+    """
+    model_dir = Path(os.environ.get("SSD_MODEL_DIR", DEFAULT_MODEL_DIR))
+    weights = model_dir / TF_WEIGHTS_NAME
+    config = model_dir / TF_CONFIG_NAME
+    if weights.is_file() and config.is_file():
+        return str(weights), str(config)
+    return None
 
 
 @dataclass
@@ -112,6 +144,10 @@ class SSDMobileNetV2Detector:
         self.net = None
         self._jetson_net = None
         self._synthetic_detections: Optional[List[DetectionResult]] = None
+        # Which label set the loaded OpenCV network's class ids index into,
+        # and which preprocessing its weights expect.
+        self.class_labels: List[str] = COCO_CLASSES
+        self.model_format: Optional[str] = None  # 'tensorflow' | 'caffe'
 
         self._init_backend(model_path, config_path)
 
@@ -127,21 +163,80 @@ class SSDMobileNetV2Detector:
             except (ImportError, Exception) as e:
                 logger.debug(f"jetson.inference not available: {e}")
 
-        if self.backend in ("opencv", "auto") and model_path:
-            try:
-                if config_path:
-                    self.net = cv2.dnn.readNetFromCaffe(config_path, model_path)
-                else:
-                    self.net = cv2.dnn.readNet(model_path)
+        if self.backend in ("opencv", "auto"):
+            # Fall back to the repo's fetched model directory when no explicit
+            # path was given, so `backend="opencv"` just works after running
+            # scripts/fetch_ssd_model.sh.
+            if not model_path:
+                discovered = default_model_paths()
+                if discovered:
+                    model_path, config_path = discovered
+                    logger.info("Using SSD-MobileNet-V2 weights discovered at %s", model_path)
+
+            if model_path and self._load_opencv_net(model_path, config_path):
                 self.backend = "opencv"
-                logger.info(f"Initialized OpenCV DNN SSD-MobileNet with {model_path}.")
                 return
-            except Exception as e:
-                logger.debug(f"OpenCV DNN init failed: {e}")
+            if self.backend == "opencv":
+                raise RuntimeError(
+                    "OpenCV DNN backend requested but no SSD-MobileNet-V2 weights could be "
+                    "loaded. Run scripts/fetch_ssd_model.sh, or pass model_path/config_path "
+                    "explicitly."
+                )
 
         # Fallback to mock / synthetic detector
         self.backend = "mock"
         logger.info("Running in MOCK/SYNTHETIC detector mode (SSD-MobileNet-V2 interface).")
+
+    def _load_opencv_net(self, model_path: str, config_path: Optional[str]) -> bool:
+        """Load SSD-MobileNet weights into cv2.dnn, picking the reader and the
+        label set from the weight file's format."""
+        suffix = Path(model_path).suffix.lower()
+        try:
+            if suffix == ".pb":
+                # TensorFlow object-detection-API frozen graph
+                # (ssd_mobilenet_v2_coco_2018_03_29). Needs the matching .pbtxt
+                # text graph so cv2.dnn can rebuild the postprocessing layers.
+                if not config_path:
+                    raise ValueError(
+                        "A TensorFlow .pb graph needs its matching .pbtxt config "
+                        "(ssd_mobilenet_v2_coco_2018_03_29.pbtxt)."
+                    )
+                self.net = cv2.dnn.readNetFromTensorflow(model_path, config_path)
+                self.model_format = "tensorflow"
+                self.class_labels = COCO_CLASSES
+            elif suffix == ".caffemodel":
+                if not config_path:
+                    raise ValueError("A .caffemodel needs its matching .prototxt config.")
+                self.net = cv2.dnn.readNetFromCaffe(config_path, model_path)
+                self.model_format = "caffe"
+                # The widely-used Caffe MobileNet-SSD weights are VOC-trained.
+                self.class_labels = VOC_CLASSES
+            else:
+                self.net = cv2.dnn.readNet(model_path, config_path or "")
+                self.model_format = "tensorflow"
+                self.class_labels = COCO_CLASSES
+        except Exception as e:
+            logger.warning("OpenCV DNN init failed for %s: %s", model_path, e)
+            self.net = None
+            return False
+
+        logger.info(
+            "Initialized OpenCV DNN SSD-MobileNet (%s format, %d-class label set) from %s.",
+            self.model_format,
+            len(self.class_labels),
+            model_path,
+        )
+        return True
+
+    def _blob_for(self, frame: np.ndarray) -> np.ndarray:
+        """Preprocess a BGR frame for the loaded network's expected input."""
+        if self.model_format == "caffe":
+            # Caffe MobileNet-SSD: scale to [-1, 1] after mean subtraction.
+            return cv2.dnn.blobFromImage(
+                frame, 0.007843, (300, 300), 127.5, swapRB=False, crop=False
+            )
+        # TF object-detection-API SSD graphs take raw 0-255 RGB.
+        return cv2.dnn.blobFromImage(frame, size=(300, 300), swapRB=True, crop=False)
 
     def set_mock_detections(self, detections: List[DetectionResult]) -> None:
         """Inject specific detections (for unit testing and controlled validation)."""
@@ -159,7 +254,11 @@ class SSDMobileNetV2Detector:
         if self._synthetic_detections is not None:
             return self._synthetic_detections
 
-        if synthetic_objects is not None and self.backend == "mock":
+        # An explicit synthetic_objects list is an injection, like
+        # set_mock_detections: honour it whatever backend is loaded. Without
+        # this, merely having the real weights on disk makes backend="auto"
+        # silently ignore simulated scenes.
+        if synthetic_objects is not None:
             return [
                 DetectionResult(
                     class_name=obj.get("name", "bottle"),
@@ -195,13 +294,7 @@ class SSDMobileNetV2Detector:
             return results
 
         elif self.backend == "opencv" and self.net is not None:
-            blob = cv2.dnn.blobFromImage(
-                cv2.resize(frame, (300, 300)),
-                0.007843,
-                (300, 300),
-                127.5,
-            )
-            self.net.setInput(blob)
+            self.net.setInput(self._blob_for(frame))
             output = self.net.forward()
 
             results = []
@@ -209,7 +302,8 @@ class SSDMobileNetV2Detector:
                 confidence = float(output[0, 0, i, 2])
                 if confidence > self.confidence_threshold:
                     idx = int(output[0, 0, i, 1])
-                    class_name = COCO_CLASSES[idx] if idx < len(COCO_CLASSES) else f"class_{idx}"
+                    labels = self.class_labels
+                    class_name = labels[idx] if 0 <= idx < len(labels) else f"class_{idx}"
                     xmin = float(np.clip(output[0, 0, i, 3], 0.0, 1.0))
                     ymin = float(np.clip(output[0, 0, i, 4], 0.0, 1.0))
                     xmax = float(np.clip(output[0, 0, i, 5], 0.0, 1.0))

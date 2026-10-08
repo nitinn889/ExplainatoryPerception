@@ -12,7 +12,7 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from nano import motor_control
 from shared.event_schema import BBox, EventType
@@ -90,6 +90,7 @@ class PerceptionActionStateMachine:
         confirm_frames: int = 3,
         timeout_sec: float = 7.0,
         motor: Optional[Any] = None,
+        ignore_classes: Optional[Iterable[str]] = None,
     ):
         self.edge_margin = edge_margin
         self.min_height = min_height
@@ -97,6 +98,17 @@ class PerceptionActionStateMachine:
         self.confirm_frames = confirm_frames
         self.timeout_sec = timeout_sec
         self.motor = motor if motor is not None else motor_control.get_controller()
+        # Classes that are never chased, only used as scene-graph context.
+        #
+        # Without this the largest-bbox-area guardrail backfires on furniture:
+        # a 1.5 m desk viewed from 1.3 m is permanently clipped, always has the
+        # largest area, and can never be made fully visible by repositioning -
+        # so the loop fixates on it and times out on every station instead of
+        # correcting toward the bottle sitting on it. Repositioning can only fix
+        # a target that *could* fit in frame. Default stays None so the spec's
+        # Phase 3 behaviour is unchanged; the demo drivers pass
+        # scene_graph.SURFACE_CLASSES.
+        self.ignore_classes = {c.lower() for c in ignore_classes} if ignore_classes else set()
 
         self.state = State.PATROL
         self.consecutive_confirm_count = 0
@@ -116,6 +128,11 @@ class PerceptionActionStateMachine:
 
         def get_name(d: Any) -> str:
             return getattr(d, "class_name", None) or (d.get("class") if isinstance(d, dict) else "object")
+
+        if self.ignore_classes:
+            detections = [d for d in detections if get_name(d).lower() not in self.ignore_classes]
+            if not detections:
+                return None
 
         # If actively adjusting or confirming a tracked target, prioritize it
         if self.tracked_target is not None and self.state in (State.ADJUST, State.CONFIRM):

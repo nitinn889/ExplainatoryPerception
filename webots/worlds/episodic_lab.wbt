@@ -1,0 +1,427 @@
+#VRML_SIM R2025a utf8
+
+# Episodic Perception - simulated lab for the live demo.
+#
+# Deliberately built from primitive Webots nodes only (no EXTERNPROTO), so the
+# world loads offline with no asset downloads - one less thing to fail during a
+# live demo.
+#
+# Every observable object is a Solid carrying:
+#   model             - the COCO class name the detector would report
+#   recognitionColors - required for the Camera's Recognition node to see it
+#
+# Heights matter more than they look. Table tops are at z = 0.74 and every
+# object on a table has its bottom face exactly there, so the bbox of the thing
+# and the bbox of the surface share an edge and
+# scene_graph.check_on_relationship() emits "<thing> ON dining table" instead of
+# falling back to unstable pairwise LEFT OF / BEHIND relations.
+#
+# Layout (ENU, z up), with the location_tag each station maps to:
+#   lab_desk_1  (+2.0, +2.1)  laptop, cup
+#   lab_desk_3  (-2.0, +2.1)  bottle, vase
+#   lab_shelf_2 ( 0.0, -2.3)  potted plant  (+ the bottle, once it is moved)
+
+WorldInfo {
+  info [
+    "Episodic Perception - memory-augmented perception-driven mobile robot."
+    "Edge: camera -> SSD-MobileNet-V2 -> scene graph -> perception-action loop."
+    "Fog: captioning -> embeddings -> vector memory -> RAG query answering."
+  ]
+  title "Episodic Perception Lab"
+  basicTimeStep 16
+  contactProperties [
+    ContactProperties {
+      material1 "caster"
+      coulombFriction [ 0 ]
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.33 0.30 0.89 1.75
+  position 0.6 -7.2 6.4
+  followSmoothness 0.2
+}
+# Plain Background and lights rather than TexturedBackground: that is a PROTO
+# Webots fetches over the network, and a world that needs a download is a world
+# that can fail to load during a demo.
+Background {
+  skyColor [ 0.42 0.52 0.62 ]
+}
+DirectionalLight {
+  direction 0.4 0.6 -1
+  intensity 2.4
+  castShadows FALSE
+}
+DirectionalLight {
+  direction -0.5 -0.3 -0.8
+  intensity 1.1
+}
+PointLight {
+  location 0 0 2.6
+  intensity 8
+  attenuation 0 0 1
+}
+
+# ---------------------------------------------------------------- room shell
+Solid {
+  translation 0 0 -0.01
+  name "floor"
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.72 0.70 0.66
+        roughness 0.9
+        metalness 0
+      }
+      geometry Box { size 7 7 0.02 }
+    }
+  ]
+  boundingObject Box { size 7 7 0.02 }
+}
+Solid {
+  translation 0 3.5 0.6
+  name "wall north"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.85 0.86 0.88 roughness 1 metalness 0 }
+      geometry Box { size 7 0.1 1.2 }
+    }
+  ]
+  boundingObject Box { size 7 0.1 1.2 }
+}
+Solid {
+  translation 0 -3.5 0.6
+  name "wall south"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.85 0.86 0.88 roughness 1 metalness 0 }
+      geometry Box { size 7 0.1 1.2 }
+    }
+  ]
+  boundingObject Box { size 7 0.1 1.2 }
+}
+Solid {
+  translation 3.5 0 0.6
+  name "wall east"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.85 0.86 0.88 roughness 1 metalness 0 }
+      geometry Box { size 0.1 7 1.2 }
+    }
+  ]
+  boundingObject Box { size 0.1 7 1.2 }
+}
+Solid {
+  translation -3.5 0 0.6
+  name "wall west"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.85 0.86 0.88 roughness 1 metalness 0 }
+      geometry Box { size 0.1 7 1.2 }
+    }
+  ]
+  boundingObject Box { size 0.1 7 1.2 }
+}
+
+# ------------------------------------------------------- lab_desk_1 (east)
+# Solid origin sits at z = 0.72, so the 4 cm top plate spans 0.70-0.74 and its
+# upper surface - where things stand - is exactly 0.74.
+Solid {
+  translation 2.0 2.1 0.72
+  name "desk 1"
+  model "dining table"
+  recognitionColors [ 0.55 0.35 0.18 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.55 0.35 0.18 roughness 0.6 metalness 0 }
+      geometry Box { size 1.5 0.7 0.04 }
+    }
+    Pose { translation 0.7 0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.7 0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation 0.7 -0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.7 -0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+  ]
+  # One solid block from the floor to the top surface. Recognition projects the
+  # bounding object, so this keeps the reported bbox's top edge on the contact
+  # plane - which is exactly what the ON test compares against.
+  boundingObject Pose {
+    translation 0 0 -0.35
+    children [ Box { size 1.5 0.7 0.74 } ]
+  }
+}
+Solid {
+  translation 2.25 2.05 0.75
+  name "laptop 1"
+  model "laptop"
+  recognitionColors [ 0.15 0.15 0.17 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.15 0.15 0.17 roughness 0.35 metalness 0.7 }
+      geometry Box { size 0.34 0.24 0.02 }
+    }
+    Pose {
+      translation -0.15 0 0.12
+      rotation 0 1 0 -0.22
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.1 0.12 0.16 roughness 0.25 metalness 0.5 }
+          geometry Box { size 0.02 0.24 0.25 }
+        }
+      ]
+    }
+  ]
+  boundingObject Pose {
+    translation -0.06 0 0.11
+    children [ Box { size 0.34 0.24 0.25 } ]
+  }
+}
+Solid {
+  translation 1.60 2.00 0.79
+  name "cup 1"
+  model "cup"
+  recognitionColors [ 0.92 0.92 0.9 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.93 0.93 0.91 roughness 0.4 metalness 0 }
+      geometry Cylinder { radius 0.045 height 0.1 subdivision 24 }
+    }
+  ]
+  boundingObject Cylinder { radius 0.045 height 0.1 subdivision 24 }
+}
+
+# ------------------------------------------------------- lab_desk_3 (west)
+Solid {
+  translation -2.0 2.1 0.72
+  name "desk 3"
+  model "dining table"
+  recognitionColors [ 0.55 0.35 0.18 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.55 0.35 0.18 roughness 0.6 metalness 0 }
+      geometry Box { size 1.5 0.7 0.04 }
+    }
+    Pose { translation 0.7 0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.7 0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation 0.7 -0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.7 -0.3 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+  ]
+  boundingObject Pose {
+    translation 0 0 -0.35
+    children [ Box { size 1.5 0.7 0.74 } ]
+  }
+}
+# The bottle: the object the perception-action loop recovers at this station,
+# and the one the controller relocates to lab_shelf_2 to produce a `moved`
+# event. Body spans 0.74-0.93, cap on top.
+DEF BOTTLE Solid {
+  translation -1.55 2.00 0.835
+  name "bottle"
+  model "bottle"
+  recognitionColors [ 0.1 0.45 0.75 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.1 0.45 0.75 roughness 0.25 metalness 0.1 }
+      geometry Cylinder { radius 0.038 height 0.19 subdivision 24 }
+    }
+    Pose {
+      translation 0 0 0.12
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.1 0.45 0.75 roughness 0.25 metalness 0.1 }
+          geometry Cylinder { radius 0.016 height 0.06 subdivision 16 }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0 0.16
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.9 0.85 0.2 roughness 0.4 metalness 0 }
+          geometry Cylinder { radius 0.019 height 0.022 subdivision 16 }
+        }
+      ]
+    }
+  ]
+  boundingObject Pose {
+    translation 0 0 0.038
+    children [ Cylinder { radius 0.038 height 0.266 subdivision 24 } ]
+  }
+}
+# A vase, not a book: a 3 cm-tall flat object can never satisfy the Phase 3
+# min_height rule from any sane distance, so the loop reads it as "too far" and
+# drives forward indefinitely. See the limitations section of demo/README.md.
+Solid {
+  translation -2.35 2.05 0.89
+  name "vase 1"
+  model "vase"
+  recognitionColors [ 0.79 0.64 0.15 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.79 0.64 0.15 roughness 0.35 metalness 0.1 }
+      geometry Cylinder { radius 0.055 height 0.3 subdivision 24 }
+    }
+  ]
+  boundingObject Cylinder { radius 0.055 height 0.3 subdivision 24 }
+}
+
+# ------------------------------------------------------- lab_shelf_2 (south)
+Solid {
+  translation 0 -2.3 0.72
+  name "shelf 2"
+  model "dining table"
+  recognitionColors [ 0.55 0.35 0.18 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.55 0.35 0.18 roughness 0.6 metalness 0 }
+      geometry Box { size 1.4 0.6 0.04 }
+    }
+    Pose { translation 0.64 0.25 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.64 0.25 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation 0.64 -0.25 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+    Pose { translation -0.64 -0.25 -0.36 children [ Shape { appearance PBRAppearance { baseColor 0.3 0.2 0.1 roughness 0.8 metalness 0 } geometry Box { size 0.06 0.06 0.68 } } ] }
+  ]
+  boundingObject Pose {
+    translation 0 0 -0.35
+    children [ Box { size 1.4 0.6 0.74 } ]
+  }
+}
+Solid {
+  translation -0.45 -2.3 0.81
+  name "plant 1"
+  model "potted plant"
+  recognitionColors [ 0.2 0.55 0.2 ]
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.6 0.35 0.25 roughness 0.9 metalness 0 }
+      geometry Cylinder { radius 0.08 height 0.14 subdivision 20 }
+    }
+    Pose {
+      translation 0 0 0.16
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.2 0.55 0.2 roughness 0.9 metalness 0 }
+          geometry Sphere { radius 0.13 subdivision 3 }
+        }
+      ]
+    }
+  ]
+  boundingObject Pose {
+    translation 0 0 0.07
+    children [ Box { size 0.26 0.26 0.42 } ]
+  }
+}
+
+# ------------------------------------------------------------- the 2WD robot
+# Origin at z = 0.052 = wheel radius, so the wheels sit on the floor, and the
+# camera at 0.748 relative = 0.80 absolute, matching demo/sim2d.py.
+Robot {
+  translation 0 0 0.052
+  rotation 0 0 1 1.5708
+  name "episodic_robot"
+  children [
+    # chassis
+    Shape {
+      appearance PBRAppearance { baseColor 0.2 0.22 0.25 roughness 0.5 metalness 0.3 }
+      geometry Box { size 0.26 0.20 0.08 }
+    }
+    # camera mast, chassis top up to the camera
+    Pose {
+      translation 0.02 0 0.395
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.3 0.32 0.35 roughness 0.6 metalness 0.4 }
+          geometry Box { size 0.04 0.04 0.71 }
+        }
+      ]
+    }
+    # the IMX219-equivalent camera, looking forward (+x) and slightly down
+    Camera {
+      translation 0.06 0 0.748
+      rotation 0 1 0 0.06
+      name "camera"
+      fieldOfView 1.0
+      width 320
+      height 240
+      near 0.05
+      recognition Recognition {
+        maxRange 6
+        maxObjects 12
+      }
+    }
+    # left wheel
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 1 0
+        anchor 0.07 0.115 0
+      }
+      device [
+        RotationalMotor {
+          name "left wheel motor"
+          maxVelocity 12
+        }
+        PositionSensor { name "left wheel sensor" }
+      ]
+      endPoint Solid {
+        translation 0.07 0.115 0
+        rotation 1 0 0 1.5708
+        name "left wheel"
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.12 0.12 0.12 roughness 0.9 metalness 0 }
+            geometry Cylinder { radius 0.052 height 0.03 subdivision 24 }
+          }
+        ]
+        boundingObject Cylinder { radius 0.052 height 0.03 subdivision 24 }
+        physics Physics { density -1 mass 0.08 }
+      }
+    }
+    # right wheel
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 1 0
+        anchor 0.07 -0.115 0
+      }
+      device [
+        RotationalMotor {
+          name "right wheel motor"
+          maxVelocity 12
+        }
+        PositionSensor { name "right wheel sensor" }
+      ]
+      endPoint Solid {
+        translation 0.07 -0.115 0
+        rotation 1 0 0 1.5708
+        name "right wheel"
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.12 0.12 0.12 roughness 0.9 metalness 0 }
+            geometry Cylinder { radius 0.052 height 0.03 subdivision 24 }
+          }
+        ]
+        boundingObject Cylinder { radius 0.052 height 0.03 subdivision 24 }
+        physics Physics { density -1 mass 0.08 }
+      }
+    }
+    # frictionless rear caster so the chassis pivots cleanly on short pulses
+    Solid {
+      translation -0.1 0 -0.026
+      name "caster"
+      contactMaterial "caster"
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.4 0.4 0.4 roughness 0.3 metalness 0.8 }
+          geometry Sphere { radius 0.026 subdivision 2 }
+        }
+      ]
+      boundingObject Sphere { radius 0.026 subdivision 2 }
+      physics Physics { density -1 mass 0.02 }
+    }
+  ]
+  boundingObject Box { size 0.26 0.20 0.08 }
+  physics Physics {
+    density -1
+    mass 1.2
+  }
+  controller "episodic_robot"
+  supervisor TRUE
+}
