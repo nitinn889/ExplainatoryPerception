@@ -5,6 +5,9 @@ requests>=2.31
 numpy>=1.24
 opencv-python>=4.8
 
+# Detector weights are not a pip dependency - fetch them with
+# scripts/fetch_ssd_model.sh (COCO-pretrained SSD-MobileNet-V2, ~70 MB).
+
 # Jetson Nano hardware-specific packages (pre-installed in JetPack or via apt):
 # Jetson.GPIO>=2.0.0
 # jetson-inference

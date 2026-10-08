@@ -87,6 +87,64 @@ Run `pytest` from the repo root — 20 tests pass.
   success rate, query latency stats), unit-tested against synthetic
   numbers in `tests/test_evaluate.py`.
 
+## Live demo (added after Phases 0-8)
+
+Two runnable demos, both driving the **same** `nano/` and `laptop/` modules —
+nothing is reimplemented:
+
+- **`demo/`** — one command (`python -m demo.run_demo`), browser dashboard at
+  `localhost:8080`. A 2D kinematic lab sim with a real pinhole camera model
+  feeds the real perception-action loop; the dashboard shows the camera view
+  with live bounding boxes and edge margins, the lab map, the state machine, the
+  event JSON, the captions, the episodic memory and a RAG query box.
+- **`webots/`** — `webots/worlds/episodic_lab.wbt` plus
+  `webots/controllers/episodic_robot/`. A 2WD chassis with a mast camera in a
+  three-station lab, built from primitive nodes only (no `EXTERNPROTO`, so it
+  loads offline). `WebotsMotorAdapter` exposes the same five-method interface as
+  `nano/motor_control.py` and uses the same short fixed-duration pulses.
+  `./scripts/run_webots_demo.sh` launches it; `--headless` and `--record` work
+  for servers and CI.
+
+Read `demo/README.md` first — it has the presentation script and a frank list of
+what the demos do not do. `docs/webots_demo_results.md` has the measured
+numbers.
+
+### Changes to Phase 0-8 code that the demo required
+
+All additive; existing behaviour and tests unchanged unless noted.
+
+- **`nano/detector.py`** — the OpenCV DNN path now actually works. It loads the
+  COCO-pretrained SSD-MobileNet-V2 TensorFlow graph via
+  `cv2.dnn.readNetFromTensorflow` with the right preprocessing, auto-discovers
+  the weights `scripts/fetch_ssd_model.sh` downloads, and picks the label set
+  from the weight format. Previously it applied Caffe-style preprocessing and
+  then indexed the result into the COCO list, which mislabels every detection
+  when used with the Caffe VOC weights it was set up for. Verified end to end:
+  0.99 "person" and 0.98 "sports ball" on a photograph.
+- **`nano/perception_action.py`** — new optional `ignore_classes`. A 1.5 m desk
+  viewed from 1.3 m is permanently clipped, always has the largest bounding
+  box, and can never be made fully visible by repositioning, so the spec's
+  "correct toward the largest partial object first" guardrail fixates on
+  furniture and times out at every station. Both demos pass
+  `SURFACE_CLASSES`; the default is `None`, so Phase 3 behaviour is unchanged.
+  **Worth a line in the report's limitations section.**
+- **`laptop/embeddings.py`** — falls back to a deterministic lexical embedder
+  when `all-MiniLM-L6-v2` cannot be downloaded, instead of raising at import.
+  `active_backend()` reports which is live so nothing over-claims semantic
+  retrieval. `tests/test_memory_store.py`'s cross-wording test now skips on the
+  fallback rather than failing.
+- **`laptop/memory_store.py`** — added `update_episode()`, so Phase 7's
+  compression (extending an episode's `end_time`) actually reaches storage
+  rather than leaving the stored row stuck at its start time. `add_episode()`
+  takes an optional `display_caption`, keeping the clean sentence separate from
+  the text that gets embedded.
+- **`laptop/rag_query.py`** — `extractive_synthesize` now answers the question
+  first and lists supporting observations after, instead of dumping a ranked
+  list. Still purely extractive, so still zero hallucination risk.
+- **`demo/fog_pipeline.py`** — new: the glue that runs Phases 6-8 in order on
+  each incoming event (contradiction → caption → compression → store). The
+  modules existed and were tested individually; nothing ran them as a pipeline.
+
 ## What's explicitly NOT done, and why
 
 - **Phase 9's real numbers are not filled in.** `docs/evaluation_results.md`
@@ -95,11 +153,13 @@ Run `pytest` from the repo root — 20 tests pass.
   which needs Phases 0-5 finished and integrated first. `laptop/evaluate.py`
   is ready to consume that data the moment it exists — do not fabricate
   placeholder numbers here.
-- **Phase 10's live demo has not been run.** `docs/demo_script.md` has the
-  walkthrough script, but it needs both sides running against real
-  hardware.
-- **`nano/*.py` are stubs only** (docstring headers, no logic) — this is
-  the next contributor's starting point. Follow
+- **Phase 10's live demo now runs in simulation, not on hardware.** Both
+  `demo/` and `webots/` run the full chain end to end and are reproducible
+  (`docs/webots_demo_results.md`). What they are not is a run on the physical
+  robot: `docs/demo_script.md`'s hardware walkthrough still needs the real
+  chassis, the real camera and the real LAN hop.
+- ~~**`nano/*.py` are stubs only**~~ — out of date, the edge side is
+  implemented (see the Phases 0-5 section above). For the original plan, follow
   `episodic_perception_build_spec.md` Section 4, Phases 0-5, in order.
   Read Section 3 (shared event schema) and Section 5 (explicit non-goals —
   no YOLO, no full SLAM, no true depth, short fixed-duration motor pulses

@@ -6,3 +6,13 @@ data/raw_sessions/*
 !data/raw_sessions/.gitkeep
 .pytest_cache/
 .mypy_cache/
+# Detector weights: ~70 MB, fetched with scripts/fetch_ssd_model.sh
+models/*/*.pb
+models/*/*.pbtxt
+models/*/*.caffemodel
+# Generated per-run by scripts/run_webots_demo.sh
+webots/controllers/*/runtime.ini
+webots/controllers/*/*.log
+webots/controllers/*/run_summary.json
+# Webots per-user viewport state, rewritten on every run
+webots/worlds/.*.wbproj

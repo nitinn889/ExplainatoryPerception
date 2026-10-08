@@ -26,10 +26,16 @@ class MemoryStore:
         self._client = chromadb.PersistentClient(path=str(persist_dir))
         self._collection = self._client.get_or_create_collection(COLLECTION_NAME)
 
-    def add_episode(self, event: Event, caption: str) -> str:
-        """Embed `caption` and store it alongside the event's metadata."""
+    def add_episode(self, event: Event, caption: str, display_caption: str | None = None) -> str:
+        """Embed `caption` and store it alongside the event's metadata.
+
+        `caption` is what gets embedded, so callers may append retrieval hints
+        to it. Pass `display_caption` to keep the clean sentence for showing to
+        a user.
+        """
         vector = embed(caption)
         metadata: dict[str, Any] = {
+            "display_caption": display_caption or caption,
             "objects": ", ".join(event.objects),
             "relationships": ", ".join(event.relationships),
             "confidence": event.confidence,
@@ -65,6 +71,21 @@ class MemoryStore:
             ids=ids, embeddings=vectors, documents=captions, metadatas=metadatas
         )
         return ids
+
+    def update_episode(self, event_id: str, caption: str, metadata: dict[str, Any]) -> None:
+        """Re-write a stored episode in place.
+
+        Phase 7's compression extends an open episode's end_time instead of
+        adding a row per observation; this is how that extension reaches
+        storage, so the stored episode keeps saying "10:00-10:30" rather than
+        going stale at its start time.
+        """
+        self._collection.update(
+            ids=[event_id],
+            embeddings=[embed(caption)],
+            documents=[caption],
+            metadatas=[metadata],
+        )
 
     def search(self, query: str, k: int = 5) -> list[dict[str, Any]]:
         """Semantic search: returns up to k episodes ranked by similarity."""

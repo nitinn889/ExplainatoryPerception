@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Episodic Perception</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d1117'/%3E%3Ccircle cx='8' cy='8' r='3.2' fill='none' stroke='%2358a6ff' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%2358a6ff'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #151b24;
+    --panel-2: #1b2230;
+    --line: #2a3340;
+    --text: #e6edf3;
+    --muted: #8b98a8;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #e3b341;
+    --bad: #f85149;
+    --mag: #bc8cff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .badge {
+    font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .badge b { color: var(--text); font-weight: 600; }
+  .badge.live { border-color: #1f6f3f; color: #8be39b; }
+  .badge.down { border-color: #6b2a28; color: #ffb4b0; }
+
+  main {
+    display: grid; gap: 12px; padding: 12px 18px 24px;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  }
+  @media (max-width: 1150px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel > h2 {
+    margin: 0; padding: 9px 12px; font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--line); background: var(--panel-2);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel > h2 .tag {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; text-transform: none;
+    letter-spacing: 0; color: var(--accent);
+  }
+  .panel .body { padding: 12px; }
+  canvas { width: 100%; display: block; background: #05080d; }
+
+  /* stats strip */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); gap: 1px; background: var(--line); }
+  .stat { background: var(--panel); padding: 9px 10px; }
+  .stat .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-family: var(--mono); font-size: 17px; margin-top: 2px; }
+
+  /* state machine */
+  .fsm { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 10px 12px; }
+  .fsm .s {
+    font-family: var(--mono); font-size: 11px; padding: 4px 9px; border-radius: 6px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel-2);
+  }
+  .fsm .s.on { color: #0d1117; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .fsm .s.on.logged { background: var(--ok); border-color: var(--ok); }
+  .fsm .arrow { color: var(--line); font-size: 11px; }
+  .signal { padding: 0 12px 11px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .signal b { color: var(--warn); }
+  .signal .act { color: var(--mag); }
+
+  /* pipeline */
+  .step { border-left: 2px solid var(--line); padding: 0 0 12px 12px; margin-left: 4px; position: relative; }
+  .step:last-child { padding-bottom: 0; }
+  .step::before {
+    content: ""; position: absolute; left: -5px; top: 5px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--line);
+  }
+  .step.hit::before { background: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,.15); }
+  .step .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .step .val { font-family: var(--mono); font-size: 12px; margin-top: 3px; word-break: break-word; }
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 7px;
+    border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); margin: 2px 3px 0 0;
+  }
+  .chip.rel { color: #9bd4ff; border-color: #22425e; }
+  .chip.new { color: var(--ok); border-color: #1f6f3f; }
+  .chip.ext { color: var(--warn); border-color: #6b5520; }
+  .chip.moved { color: var(--mag); border-color: #4b3570; }
+  .chip.drop { color: var(--muted); }
+  pre {
+    margin: 4px 0 0; font-family: var(--mono); font-size: 11px; line-height: 1.45;
+    background: #05080d; border: 1px solid var(--line); border-radius: 6px; padding: 9px;
+    max-height: 190px; overflow: auto; color: #b9c6d4;
+  }
+
+  /* episodes */
+  .eplist { max-height: 340px; overflow: auto; }
+  .ep { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .ep:last-child { border-bottom: 0; }
+  .ep .cap { font-size: 13px; }
+  .ep .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+
+  /* ask */
+  .ask { display: flex; gap: 8px; padding: 12px; }
+  .ask input {
+    flex: 1; min-width: 0; background: #05080d; border: 1px solid var(--line); color: var(--text);
+    border-radius: 7px; padding: 9px 11px; font: inherit;
+  }
+  .ask input:focus { outline: none; border-color: var(--accent); }
+  .ask button, .ctrl button {
+    background: var(--accent); color: #07121f; border: 0; border-radius: 7px; padding: 9px 14px;
+    font: 600 13px inherit; cursor: pointer;
+  }
+  .ask button:disabled { opacity: .5; cursor: default; }
+  .ctrl { display: flex; gap: 7px; flex-wrap: wrap; padding: 0 12px 12px; }
+  .ctrl button { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .ctrl button:hover { border-color: var(--accent); }
+  .suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
+  .suggest button {
+    background: transparent; border: 1px dashed var(--line); color: var(--muted);
+    border-radius: 999px; padding: 4px 10px; font: 11.5px var(--mono); cursor: pointer;
+  }
+  .suggest button:hover { color: var(--accent); border-color: var(--accent); }
+  .answer { padding: 0 12px 12px; }
+  .answer .txt { white-space: pre-wrap; font-size: 13px; }
+  .answer .lat { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+  .empty { color: var(--muted); font-size: 12.5px; padding: 12px; }
+  footer { padding: 0 18px 22px; color: var(--muted); font-size: 11.5px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Episodic Perception &mdash; live demo</h1>
+    <div class="sub">Edge: camera &rarr; detect &rarr; scene graph &rarr; perception&ndash;action loop &rarr; importance filter &nbsp;|&nbsp; Fog: caption &rarr; embed &rarr; vector memory &rarr; RAG</div>
+  </div>
+  <div class="badges">
+    <span class="badge" id="b-link">link <b>connecting…</b></span>
+    <span class="badge" id="b-src">edge <b>&mdash;</b></span>
+    <span class="badge" id="b-det">detector <b>&mdash;</b></span>
+    <span class="badge" id="b-emb">embeddings <b>&mdash;</b></span>
+    <span class="badge" id="b-store">store <b>&mdash;</b></span>
+  </div>
+</header>
+
+<main>
+  <!-- ---------------------------------------------------------- EDGE -->
+  <section style="display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="panel">
+      <h2>Camera view <span class="tag" id="cam-tag">&mdash;</span></h2>
+      <canvas id="cam" width="640" height="480"></canvas>
+      <div class="fsm" id="fsm"></div>
+      <div class="signal" id="signal">waiting for the edge…</div>
+    </div>
+    <div class="panel">
+      <h2>Edge counters</h2>
+      <div class="stats" id="edge-stats"></div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- MAP -->
+  <section style="display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="panel">
+      <h2>Lab map <span class="tag" id="map-tag">&mdash;</span></h2>
+      <canvas id="map" width="520" height="520"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Demo controls</h2>
+      <div class="ctrl" id="ctrl">
+        <button data-a="start">Start patrol</button>
+        <button data-a="pause">Pause</button>
+        <button data-a="resume">Resume</button>
+        <button data-a="move_bottle">Move the bottle (staged event)</button>
+      </div>
+      <div class="empty" id="ctrl-note" style="padding-top:0"></div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- FOG -->
+  <section style="display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="panel">
+      <h2>Pipeline &mdash; last observation <span class="tag" id="pipe-tag">&mdash;</span></h2>
+      <div class="body" id="pipeline"><div class="empty" style="padding:0">No episode logged yet. The robot logs one only after the perception&ndash;action loop confirms a full, stable view.</div></div>
+    </div>
+    <div class="panel">
+      <h2>Memory <span class="tag" id="mem-tag">&mdash;</span></h2>
+      <div class="stats" id="fog-stats"></div>
+      <div class="eplist" id="episodes"><div class="empty">Episodic memory is empty.</div></div>
+    </div>
+    <div class="panel">
+      <h2>Ask the robot <span class="tag">RAG over episodic memory</span></h2>
+      <form class="ask" id="ask-form">
+        <input id="q" placeholder="where is the bottle?" autocomplete="off" />
+        <button type="submit" id="ask-btn">Ask</button>
+      </form>
+      <div class="suggest" id="suggest"></div>
+      <div class="answer" id="answer"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Boxes are real projections, not an animation &mdash; when the loop pulses <code>turn_right</code>, the box moves because the camera turned.
+  The episode counter rises more slowly than the frame counter: that gap is the importance filter plus memory compression doing their job.
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const STATES = ["PATROL", "PARTIAL", "ADJUST", "CONFIRM", "LOGGED"];
+  // Mirrors nano/scene_graph.py SURFACE_CLASSES.
+  const SURFACES = new Set(["table", "dining table", "desk", "shelf", "bench", "counter", "chair"]);
+  const SUGGESTIONS = [
+    "where is the bottle?",
+    "what is on desk 3?",
+    "did anything move?",
+    "have you seen a laptop?",
+    "what is on the shelf?",
+  ];
+
+  let telemetry = null;
+  let lastEpisode = null;
+  let worldCache = [];
+  let stationsCache = [];
+  const camImage = new Image();
+  let camImageReady = false;
+
+  /* -------------------------------------------------- camera rendering */
+  function drawCamera() {
+    const cv = $("cam"), ctx = cv.getContext("2d");
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    if (camImageReady) {
+      ctx.drawImage(camImage, 0, 0, W, H);
+    } else {
+      // Synthetic backdrop for the 2D sim: floor, wall, horizon.
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#1d2733"); g.addColorStop(0.52, "#243040"); g.addColorStop(1, "#15202c");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = "rgba(255,255,255,.07)"; ctx.lineWidth = 1;
+      for (let i = 1; i < 10; i++) {
+        const y = H * (0.5 + 0.5 * Math.pow(i / 10, 1.9));
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,.14)";
+      ctx.beginPath(); ctx.moveTo(0, H * 0.5); ctx.lineTo(W, H * 0.5); ctx.stroke();
+    }
+
+    if (!telemetry) {
+      ctx.fillStyle = "#8b98a8"; ctx.font = "13px ui-monospace, monospace";
+      ctx.fillText("waiting for frames…", 14, 24);
+      return;
+    }
+
+    // Edge-margin bands: the zone that makes a box "clipped".
+    const m = (telemetry.edge_margin ?? 0.05);
+    ctx.fillStyle = "rgba(248,81,73,.09)";
+    ctx.fillRect(0, 0, W * m, H);
+    ctx.fillRect(W * (1 - m), 0, W * m, H);
+    ctx.fillRect(0, H * (1 - m), W, H * m);
+    ctx.strokeStyle = "rgba(248,81,73,.35)"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W * m, 0); ctx.lineTo(W * m, H);
+    ctx.moveTo(W * (1 - m), 0); ctx.lineTo(W * (1 - m), H);
+    ctx.moveTo(0, H * (1 - m)); ctx.lineTo(W, H * (1 - m));
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // Support surfaces are scene-graph context the loop never chases (see
+    // PerceptionActionStateMachine.ignore_classes), so they are drawn muted and
+    // first - what stands out is the object the loop is actually working on.
+    const dets = (telemetry.detections || [])
+      .slice()
+      .sort((a, b) => (SURFACES.has(b.class) ? 1 : 0) - (SURFACES.has(a.class) ? 1 : 0));
+
+    for (const d of dets) {
+      const b = d.bbox;
+      const x = b.xmin * W, y = b.ymin * H, w = (b.xmax - b.xmin) * W, h = (b.ymax - b.ymin) * H;
+      const surface = SURFACES.has(d.class);
+      const color = d.color || "#58a6ff";
+
+      if (!camImageReady) { ctx.fillStyle = hexA(color, surface ? 0.26 : 0.55); ctx.fillRect(x, y, w, h); }
+
+      ctx.setLineDash(surface ? [5, 4] : []);
+      ctx.lineWidth = surface ? 1 : d.clipped ? 3 : 2;
+      ctx.strokeStyle = surface ? "rgba(190,200,212,.5)" : d.clipped ? "#f85149" : "#3fb950";
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+
+      const label = surface ? d.class : `${d.class} ${(d.confidence * 100).toFixed(0)}%`;
+      ctx.font = `${surface ? "500" : "600"} 12px ui-monospace, monospace`;
+      const tw = ctx.measureText(label).width + 10;
+      // Keep the chip inside the frame and below the top edge when the box is
+      // clipped upward, so labels never sit half off-screen.
+      const tx = Math.max(0, Math.min(x, W - tw));
+      const ty = y < 18 ? Math.min(y + h, H - 17) : y - 17;
+      ctx.fillStyle = surface
+        ? "rgba(140,152,168,.75)"
+        : d.clipped ? "rgba(248,81,73,.92)" : "rgba(63,185,80,.92)";
+      ctx.fillRect(tx, ty, tw, 17);
+      ctx.fillStyle = "#06101c"; ctx.fillText(label, tx + 5, ty + 12.5);
+    }
+
+    // Correction arrow for the pulse the loop just issued.
+    const act = telemetry.last_motor_action && telemetry.last_motor_action[0];
+    if (act && ["turn_left", "turn_right", "forward", "reverse"].includes(act)) {
+      ctx.fillStyle = "rgba(188,140,255,.92)";
+      ctx.font = "700 28px -apple-system, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      const glyph = { turn_left: "↰", turn_right: "↱", forward: "↑", reverse: "↓" }[act];
+      ctx.fillText(glyph, W / 2, H - 16);
+      ctx.font = "600 11px ui-monospace, monospace";
+      ctx.fillText(act, W / 2, H - 42);
+      ctx.textAlign = "left";
+    }
+  }
+
+  function hexA(hex, a) {
+    const n = parseInt(hex.replace("#", ""), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  /* ------------------------------------------------------ map rendering */
+  function drawMap() {
+    const cv = $("map"), ctx = cv.getContext("2d");
+    const W = cv.width, H = cv.height, SPAN = 7.4;
+    const s = Math.min(W, H) / SPAN;
+    const toPx = (x, y) => [W / 2 + x * s, H / 2 - y * s];
+
+    ctx.fillStyle = "#070b11"; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(255,255,255,.05)"; ctx.lineWidth = 1;
+    for (let g = -3; g <= 3; g++) {
+      const [gx, gy] = toPx(g, 0);
+      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+    }
+    // room walls
+    const [wx, wy] = toPx(-3.5, 3.5);
+    ctx.strokeStyle = "#3a465a"; ctx.lineWidth = 2;
+    ctx.strokeRect(wx, wy, 7 * s, 7 * s);
+
+    // stations
+    for (const st of stationsCache) {
+      const [sx, sy] = toPx(st.x, st.y);
+      ctx.strokeStyle = "rgba(88,166,255,.5)"; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(sx, sy, 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#6d7d91"; ctx.font = "10px ui-monospace, monospace";
+      ctx.fillText(st.tag, sx + 12, sy + 3.5);
+    }
+
+    // objects
+    for (const o of worldCache) {
+      const [ox, oy] = toPx(o.x, o.y);
+      const r = Math.max(4, o.half_width * s);
+      ctx.fillStyle = o.color || "#58a6ff";
+      if (SURFACES.has(o.class)) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillRect(ox - r, oy - 0.35 * s, 2 * r, 0.7 * s);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#c3ced9"; ctx.font = "10px ui-monospace, monospace";
+        ctx.fillText(o.class, ox + r + 4, oy + 3.5);
+      }
+    }
+
+    if (!telemetry || !telemetry.pose) return;
+    const p = telemetry.pose;
+    const [rx, ry] = toPx(p.x, p.y);
+    const fov = p.hfov || 1.0, reach = 3.2 * s;
+
+    // field-of-view wedge
+    const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, reach);
+    grad.addColorStop(0, "rgba(88,166,255,.32)"); grad.addColorStop(1, "rgba(88,166,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(rx, ry);
+    ctx.arc(rx, ry, reach, -p.yaw - fov / 2, -p.yaw + fov / 2);
+    ctx.closePath(); ctx.fill();
+
+    // chassis
+    ctx.save(); ctx.translate(rx, ry); ctx.rotate(-p.yaw);
+    ctx.fillStyle = "#e3b341";
+    ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-8, 7); ctx.lineTo(-8, -7); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------------------- panels */
+  function renderFsm() {
+    const cur = telemetry ? telemetry.state : null;
+    $("fsm").innerHTML = STATES.map((s, i) => {
+      const on = s === cur ? ` on${s === "LOGGED" ? " logged" : ""}` : "";
+      return `${i ? '<span class="arrow">&rarr;</span>' : ""}<span class="s${on}">${s}</span>`;
+    }).join("");
+
+    if (!telemetry) return;
+    const act = telemetry.last_motor_action;
+    $("signal").innerHTML =
+      `signal <b>${telemetry.signal || "—"}</b>` +
+      (act ? ` &nbsp;·&nbsp; pulse <span class="act">${act[0]}(${act[1]}ms)</span>` : "") +
+      ` &nbsp;·&nbsp; ${(telemetry.detections || []).length} detections`;
+    $("cam-tag").textContent = telemetry.location_tag || "—";
+    $("map-tag").textContent = telemetry.pose
+      ? `x ${telemetry.pose.x}  y ${telemetry.pose.y}  yaw ${telemetry.pose.yaw}` : "—";
+  }
+
+  function statCells(el, pairs) {
+    el.innerHTML = pairs.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  }
+
+  function renderEdgeStats() {
+    const s = (telemetry && telemetry.stats) || {};
+    // "partial views" counts entries into ADJUST; "recovered" counts the ones
+    // that then reached a confirmed full view. Their ratio is the
+    // perception-action success rate the report asks for.
+    const pv = s.partial_views ?? 0;
+    const rate = pv ? `${Math.round((100 * (s.recoveries ?? 0)) / pv)}%` : "—";
+    statCells($("edge-stats"), [
+      ["frames", s.frames ?? 0],
+      ["partial views", pv],
+      ["recovered", s.recoveries ?? 0],
+      ["timed out", s.timeouts ?? 0],
+      ["p-a success", rate],
+      ["filtered / sent", `${s.filtered_out ?? 0} / ${s.events_sent ?? 0}`],
+    ]);
+  }
+
+  function renderPipeline() {
+    if (!lastEpisode) return;
+    const e = lastEpisode, ev = e.event, ep = e.episode;
+    const rels = (ev.relationships || []).map((r) => `<span class="chip rel">${r}</span>`).join("") || '<span class="chip drop">none inferred</span>';
+    const objs = (ev.objects || []).map((o) => `<span class="chip">${o}</span>`).join("");
+    const actionChip = e.action === "new"
+      ? '<span class="chip new">NEW EPISODE</span>'
+      : `<span class="chip ext">EXTENDED &middot; ${ep.observation_count}&times; over ${ep.duration_sec}s</span>`;
+    const movedChip = e.moved ? '<span class="chip moved">CONTRADICTION &rarr; moved</span>' : "";
+
+    $("pipe-tag").textContent = `${ev.event_type} @ ${ev.location_tag}`;
+    $("pipeline").innerHTML = `
+      <div class="step hit"><div class="lbl">2 &middot; scene graph (nano/scene_graph.py)</div><div class="val">${rels}</div></div>
+      <div class="step hit"><div class="lbl">3 &middot; perception&ndash;action verdict</div><div class="val">${ev.event_type} &middot; confidence ${ev.confidence}</div></div>
+      <div class="step hit"><div class="lbl">4 &middot; importance filter passed &rarr; objects</div><div class="val">${objs}</div></div>
+      <div class="step hit"><div class="lbl">5 &middot; event JSON on the wire (shared/event_schema.py)</div><pre>${esc(JSON.stringify(ev, null, 2))}</pre></div>
+      <div class="step hit"><div class="lbl">6 &middot; caption (laptop/captioning.py)</div><div class="val">${esc(e.caption)}</div></div>
+      <div class="step hit"><div class="lbl">7 &middot; compression + contradiction</div><div class="val">${actionChip}${movedChip}</div></div>
+    `;
+  }
+
+  function renderFog(snap) {
+    if (!snap) return;
+    // The spec's compression ratio is raw frames processed vs. episodes
+    // actually stored, so it spans both the importance filter and compression.
+    const frames = (telemetry && telemetry.stats && telemetry.stats.frames) || 0;
+    const overall = snap.stored_episodes ? (frames / snap.stored_episodes).toFixed(0) : "—";
+    statCells($("fog-stats"), [
+      ["frames &rarr; episodes", `${overall}&times;`],
+      ["events in", snap.raw_events],
+      ["episodes", snap.stored_episodes],
+      ["merged by compression", `${snap.compression_ratio}&times;`],
+      ["q mean ms", snap.query_latency_ms_mean ?? "—"],
+      ["q p95 ms", snap.query_latency_ms_p95 ?? "—"],
+    ]);
+    $("mem-tag").textContent = snap.store_backend || "";
+    $("b-emb").innerHTML = `embeddings <b>${snap.embedding_backend}</b>`;
+    $("b-store").innerHTML = `store <b>${(snap.store_backend || "").split(" ")[0]}</b>`;
+
+    const eps = snap.episodes || [];
+    $("episodes").innerHTML = eps.length
+      ? eps.map((ep) => `
+        <div class="ep">
+          <div class="cap">${esc(ep.caption)}</div>
+          <div class="meta">${ep.location_tag} &middot; ${ep.event_type} &middot; conf ${ep.confidence} &middot; ${ep.observation_count}&times;${ep.duration_sec > 0 ? ` over ${ep.duration_sec}s` : ""}</div>
+        </div>`).join("")
+      : '<div class="empty">Episodic memory is empty.</div>';
+  }
+
+  function renderAnswer(a) {
+    const eps = (a.episodes || []).map((ep) =>
+      `<div class="ep"><div class="cap">${esc(ep.display_caption || ep.caption)}</div><div class="meta">${ep.location_tag || "?"} &middot; distance ${Number(ep.distance ?? 0).toFixed(3)}</div></div>`
+    ).join("");
+    $("answer").innerHTML =
+      `<div class="txt">${esc(a.answer)}</div>` +
+      `<div class="lat">${a.latency_ms} ms &middot; top-${(a.episodes || []).length} retrieved &middot; ${a.embedding_backend} embeddings</div>` +
+      (eps ? `<div class="eplist" style="margin-top:8px;border-top:1px solid var(--line)">${eps}</div>` : "");
+  }
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  /* ----------------------------------------------------------- transport */
+  function applyTelemetry(t) {
+    telemetry = t;
+    if (t.world && t.world.length) worldCache = t.world;
+    if (t.stations && t.stations.length) stationsCache = t.stations;
+    $("b-src").innerHTML = `edge <b>${t.source || "?"}</b>`;
+    $("b-det").innerHTML = `detector <b>${t.detector || "?"}</b>`;
+    if (t.frame_jpeg_b64) {
+      camImage.onload = () => { camImageReady = true; drawCamera(); };
+      camImage.src = "data:image/jpeg;base64," + t.frame_jpeg_b64;
+    }
+    renderFsm(); renderEdgeStats(); drawCamera(); drawMap();
+  }
+
+  function connect() {
+    const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+    ws.onopen = () => { $("b-link").className = "badge live"; $("b-link").innerHTML = "link <b>live</b>"; };
+    ws.onclose = () => {
+      $("b-link").className = "badge down"; $("b-link").innerHTML = "link <b>reconnecting…</b>";
+      setTimeout(connect, 1500);
+    };
+    ws.onmessage = (msg) => {
+      const { kind, data } = JSON.parse(msg.data);
+      if (kind === "telemetry") applyTelemetry(data);
+      else if (kind === "episode") { lastEpisode = data; renderPipeline(); refreshState(); }
+      else if (kind === "answer") renderAnswer(data);
+      else if (kind === "hello") {
+        if (data.telemetry && Object.keys(data.telemetry).length) applyTelemetry(data.telemetry);
+        if (data.recent && data.recent.length) { lastEpisode = data.recent[data.recent.length - 1]; renderPipeline(); }
+        renderFog(data.snapshot);
+        noteAgent(data.agent);
+      }
+    };
+  }
+
+  function noteAgent(a) {
+    $("ctrl-note").textContent = a && a.available
+      ? "Driving the built-in 2D lab sim."
+      : "No 2D sim attached — the edge is Webots or real hardware, so these buttons are inactive.";
+    $("ctrl").querySelectorAll("button").forEach((b) => { b.disabled = !(a && a.available); });
+  }
+
+  async function refreshState() {
+    try { renderFog((await (await fetch("/state")).json()).snapshot); } catch (_) {}
+  }
+
+  /* -------------------------------------------------------------- wiring */
+  $("ask-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const q = $("q").value.trim();
+    if (!q) return;
+    $("ask-btn").disabled = true;
+    $("answer").innerHTML = '<div class="txt" style="color:var(--muted)">retrieving…</div>';
+    try {
+      renderAnswer(await (await fetch(`/query?q=${encodeURIComponent(q)}&k=4`)).json());
+    } catch (e) {
+      $("answer").innerHTML = `<div class="txt" style="color:var(--bad)">query failed: ${esc(e)}</div>`;
+    }
+    $("ask-btn").disabled = false;
+    refreshState();
+  });
+
+  $("suggest").innerHTML = SUGGESTIONS.map((s) => `<button type="button">${s}</button>`).join("");
+  $("suggest").addEventListener("click", (ev) => {
+    if (ev.target.tagName !== "BUTTON") return;
+    $("q").value = ev.target.textContent;
+    $("ask-form").requestSubmit();
+  });
+
+  $("ctrl").addEventListener("click", async (ev) => {
+    const action = ev.target.dataset && ev.target.dataset.a;
+    if (!action) return;
+    try { await fetch(`/control/${action}`, { method: "POST" }); } catch (_) {}
+  });
+
+  renderFsm(); renderEdgeStats(); drawCamera(); drawMap();
+  connect();
+  setInterval(refreshState, 4000);
+})();
+</script>
+</body>
+</html>
