@@ -585,9 +585,10 @@ class EpisodicRobot:
         filtered = self.importance_scorer.filter_event(event)
         if filtered is None:
             self.filtered_out += 1
-            # Not noise: during a dwell the robot keeps re-confirming the same
-            # fact, and dropping those here is exactly what Phase 4 is for.
-            logger.info(
+            # Per-frame, this fires a couple of times a second for the whole
+            # dwell and buries everything else. The dashboard shows the running
+            # count live; the console gets the state transitions that matter.
+            logger.debug(
                 "Observation dropped as redundant: %s %s @%s",
                 event.event_type,
                 event.objects,

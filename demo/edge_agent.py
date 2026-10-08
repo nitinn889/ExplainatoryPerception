@@ -107,6 +107,7 @@ class EdgeAgent:
         self.lap = 0
         self.bottle_moves = 0
         self.last_detections: list[ProjectedDetection] = []
+        self._dropped_here = 0
 
         self._stop = threading.Event()
         self._resume = threading.Event()
@@ -219,6 +220,8 @@ class EdgeAgent:
     # -- perception-action -------------------------------------------------
     def _observe_station(self) -> None:
         self.perception_action.reset_to_patrol()
+        self._dropped_here = 0
+        logged_here = 0
 
         for _ in range(self.station_frames):
             if not self._wait():
@@ -260,7 +263,9 @@ class EdgeAgent:
                     if self._corrected_this_target:
                         self.recoveries += 1
                 self._corrected_this_target = False
+                before = self.events_sent
                 self._dispatch(emitted, detections)
+                logged_here += self.events_sent - before
                 # Keep observing rather than leaving the moment something is
                 # logged: a patrolling robot dwells, and the repeat
                 # observations are exactly what the Phase 4 importance filter
@@ -270,6 +275,13 @@ class EdgeAgent:
             elapsed = time.perf_counter() - frame_started
             if elapsed < self.frame_interval:
                 time.sleep(self.frame_interval - elapsed)
+
+        logger.info(
+            "Leaving %s: logged %d new episode(s), importance filter dropped %d repeat(s).",
+            self.location_tag,
+            logged_here,
+            self._dropped_here,
+        )
 
     def _dispatch(self, emitted, detections) -> None:
         """Scene graph -> importance filter -> event send.
@@ -297,9 +309,11 @@ class EdgeAgent:
         filtered = self.importance_scorer.filter_event(event)
         if filtered is None:
             self.filtered_out += 1
-            # Not noise: during a dwell the robot keeps re-confirming the same
-            # fact, and dropping those here is exactly what Phase 4 is for.
-            logger.info(
+            self._dropped_here += 1
+            # Per-frame, this fires a couple of times a second for the whole
+            # dwell and buries everything else. The count is reported once when
+            # the robot leaves the station instead; the dashboard shows it live.
+            logger.debug(
                 "Observation dropped as redundant: %s %s @%s",
                 event.event_type, event.objects, event.location_tag,
             )
