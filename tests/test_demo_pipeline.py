@@ -296,7 +296,10 @@ def test_rag_query_imports_without_chromadb_installed():
         import sys
 
         class _Blocker:
-            def find_module(self, name, path=None):
+            # find_spec, not find_module: the legacy finder API was removed in
+            # Python 3.12, so a find_module-based blocker is silently ignored
+            # and the test passes without ever blocking anything.
+            def find_spec(self, name, path=None, target=None):
                 if name == "chromadb" or name.startswith("chromadb."):
                     raise ImportError("chromadb is blocked for this test")
                 return None
