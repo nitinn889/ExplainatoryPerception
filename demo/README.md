@@ -9,7 +9,7 @@ fog code — the Jetson Nano's own modules from `nano/` and the laptop's from
 | Install | nothing beyond `requirements-laptop.txt` | Webots R2023b+ (~1 GB) |
 | Start-up | ~2 s | ~20 s |
 | Camera | pinhole projection, drawn in the browser | real rendered frames |
-| Detector | geometric ground truth | simulator recognition, **or** the real SSD-MobileNet-V2 |
+| Detector | geometric ground truth | ground-truth projection, **or** the real SSD-MobileNet-V2 |
 | Physics | differential-drive kinematics | full rigid-body (ODE) |
 | Shows the fog side | yes — captions, memory, compression, RAG, all live | streams into the same dashboard |
 
@@ -102,10 +102,16 @@ thing here as on the chassis.
 
 ### Detector choice
 
-`--detector recognition` (default) uses Webots' `Recognition` node: ground-truth
-boxes from the simulator. It is deterministic, which is what you want in front
-of an audience, and the dashboard labels it `webots-recognition (ground truth)`
-so nobody mistakes it for CNN output.
+`--detector groundtruth` (default) projects tight bounding boxes from the
+simulator's own geometry. It is deterministic, which is what you want in front
+of an audience, and the dashboard labels it
+`simulated detector (tight ground-truth projection)` so nobody mistakes it for
+CNN output.
+
+(Webots' `Recognition` node looks like the obvious choice and was the first
+thing this used, but it reports the projection of a bounding *sphere*. For a
+1.5 m desk at 1.3 m that fills the whole frame, which breaks both the clip test
+and the `ON` relation. The controller's docstring has the measured numbers.)
 
 `--detector ssd` runs the real COCO-pretrained SSD-MobileNet-V2 through
 `nano/detector.py` over the rendered frames. Fetch the weights first:
@@ -114,13 +120,17 @@ so nobody mistakes it for CNN output.
 ./scripts/fetch_ssd_model.sh
 ```
 
-Measured behaviour of this path is in [`../docs/webots_demo_results.md`](../docs/webots_demo_results.md).
-Expect it to be worse than on real camera frames: the lab is built from untextured
-primitives, and a COCO-trained network has never seen a bottle that looks like a
-blue cylinder. That is a property of the *renderer*, not of the detector — the
-same weights score 0.99 on a photograph of a person and 0.98 on a sports ball.
-If you need to show the detector working on real imagery, point
-`nano/main_loop.py --mode usb --display` at a webcam.
+**It does not work well on this world, and that is measured, not assumed.** On
+the camera frame at `lab_desk_3`, SSD-MobileNet-V2 returns exactly one
+detection at any threshold down to 0.15: `bench 0.85` covering the desk. It
+misses the bottle and the vase entirely. The same weights score 0.99 "person"
+and 0.98 "sports ball" on photographs, so this is the *renderer* — a
+COCO-trained network has never seen a bottle that looks like a smooth blue
+cylinder with no label and no texture. The frame and the full output are in
+[`../docs/webots_demo_results.md`](../docs/webots_demo_results.md).
+
+To show the detector working on real imagery, point it at a webcam:
+`python -m nano.main_loop --mode usb --display`.
 
 ---
 
@@ -152,6 +162,15 @@ Things this demo does not do, so nothing in a report has to over-claim:
   `PerceptionActionStateMachine`; the default behaviour is unchanged. This came
   out of running the loop against faithful projection geometry and is worth a
   line in the report's limitations section.
+* **The `ON` test needs a looser margin in Webots than the library default.**
+  It compares an object's bottom edge against the surface's bbox *top* edge,
+  but perspective puts a deep surface's projected top edge at its **far** edge,
+  not at the contact point — so the gap grows the closer the camera is and the
+  further forward on the desk the object sits. Measured at `lab_desk_3`: the
+  vase (1.46 m away) is 0.017 off, the bottle (0.82 m away) is 0.118 off. The
+  Webots controller passes `y_margin=0.15`; a margin derived from the surface's
+  apparent depth would be the principled fix. The 2D sim does not hit this
+  because its objects have no depth.
 * **Embeddings may be the lexical fallback.** `all-MiniLM-L6-v2` has to be
   downloaded from HuggingFace on first use. Where that is unavailable,
   `laptop/embeddings.py` falls back to a deterministic hashed-token embedder.

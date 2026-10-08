@@ -60,24 +60,47 @@ full reading of these numbers.
 
 The headline runs use ground-truth detection (tight bounding boxes projected
 from the simulator's own geometry in Webots, pinhole projection in the 2D sim).
-That is a deliberate
-choice for a live demo: it is deterministic, and it isolates the thing the
-project is actually about — the perception-action loop and the memory — from
-detector noise.
+That is a deliberate choice for a live demo: it is deterministic, and it
+isolates the thing the project is actually about — the perception-action loop
+and the memory — from detector noise.
 
 The real COCO-pretrained SSD-MobileNet-V2 is wired in and runs
-(`--detector ssd`), and `nano/detector.py` loads it through `cv2.dnn` with the
-correct TensorFlow-graph preprocessing. Verified on photographs: 0.99 on a
-person, 0.98 on a sports ball. On the Webots lab it performs far worse, because
-the lab is built from untextured primitives and a COCO-trained network has never
-seen a bottle that looks like a smooth blue cylinder. That is a property of the
-renderer, not of the detector or of the pipeline. For a demonstration of the
-detector on real imagery, point it at a webcam:
+(`--detector ssd`); `nano/detector.py` loads it through `cv2.dnn` with the
+correct TensorFlow-graph preprocessing. It works: on photographs it scores
+0.99 "person" and 0.98 "sports ball".
+
+On the Webots lab it does not. This is what the robot's camera sees at the
+`lab_desk_3` station — the desk, the vase centred, the bottle clipped on the
+right edge:
+
+![Webots camera frame at lab_desk_3](images/webots_camera_frame.png)
+
+and this is everything SSD-MobileNet-V2 reports on that exact frame, at every
+threshold down to 0.15:
+
+```
+bench  0.851  bbox (0.147, 0.163) - (0.998, 0.985)
+```
+
+One detection. It finds the desk and calls it a bench — a fair confusion for an
+untextured brown slab — and misses the bottle and the vase completely. That is
+a property of the **renderer**, not of the detector or of the pipeline: a
+COCO-trained network has never seen a bottle that looks like a smooth blue
+cylinder with no label, no highlights and no texture. Photoreal assets or a
+fine-tune on self-collected lab frames (which is what Phase 9 is for) would be
+the fix.
+
+So: use `--detector groundtruth` for the demo, and demonstrate the detector on
+real imagery instead:
 
 ```bash
 ./scripts/fetch_ssd_model.sh
 python -m nano.main_loop --mode usb --display
 ```
+
+## The dashboard
+
+![Episodic Perception dashboard](images/dashboard.png)
 
 ## What these numbers are not
 

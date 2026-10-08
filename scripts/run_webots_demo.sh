@@ -21,7 +21,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --headless) HEADLESS=1; shift ;;
     --record)   HEADLESS=1; RECORD="${2:?--record needs an output .mp4 path}"; shift 2 ;;
-    --detector) CONTROLLER_ARGS+=(--detector "${2:?--detector needs recognition|ssd}"); shift 2 ;;
+    --detector) CONTROLLER_ARGS+=(--detector "${2:?--detector needs groundtruth|ssd}"); shift 2 ;;
     --fog-url)  CONTROLLER_ARGS+=(--fog-url "$2"); shift 2 ;;
     *)          CONTROLLER_ARGS+=("$1"); shift ;;
   esac
