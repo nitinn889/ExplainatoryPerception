@@ -11,6 +11,15 @@ import tempfile
 
 import pytest
 
+# The ChromaDB-backed store is an optional extra: demo/fog_pipeline.py falls
+# back to an in-process store without it, so the demo runs on a lightweight
+# install. These tests exercise ChromaDB specifically, so skip rather than
+# error when it is not installed.
+pytest.importorskip(
+    "chromadb",
+    reason="needs the full install: pip install -r requirements-laptop.txt",
+)
+
 from laptop.memory_store import MemoryStore
 from laptop.rag_query import answer_question
 from shared.event_schema import BBox, Event, EventType

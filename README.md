@@ -28,9 +28,10 @@ python -m demo.run_demo --no-sim      # dashboard, one terminal
 
 Both drive the *same* `nano/` and `laptop/` modules the real robot runs.
 
-- **[`docs/DEMO_HOWTO.md`](docs/DEMO_HOWTO.md)** — step-by-step setup, what to
-  show and in what order, and the questions you will get asked. Start here if
-  you are presenting this.
+- **[`docs/DEMO_HOWTO.md`](docs/DEMO_HOWTO.md)** — **start here if you are
+  running or presenting this.** Written for someone who has never seen the
+  project: clone, install, run, what to show in what order, and the questions
+  you will be asked.
 - [`demo/README.md`](demo/README.md) — how the two demos differ, and an honest
   list of what they do not do.
 - [`docs/webots_demo_results.md`](docs/webots_demo_results.md) — measured

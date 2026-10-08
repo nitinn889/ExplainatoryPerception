@@ -4,7 +4,15 @@ and end-to-end simulation from nano/main_loop.py.
 """
 
 from datetime import datetime, timezone
+
 import pytest
+
+# Starlette's TestClient is built on httpx, which is a test-only dependency
+# (see requirements-dev.txt) rather than something the demo needs at runtime.
+pytest.importorskip(
+    "httpx", reason="needs the test extras: pip install -r requirements-dev.txt"
+)
+
 from fastapi.testclient import TestClient
 
 from laptop.event_server import app, clear_events, received_events
