@@ -314,3 +314,60 @@ def test_rag_query_imports_without_chromadb_installed():
         [sys.executable, "-c", probe], capture_output=True, text=True, cwd=str(REPO_ROOT)
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_events_from_an_edge_with_a_1970_clock_get_the_fog_receipt_time(pipeline):
+    from datetime import datetime, timezone
+
+    event = _event(["laptop", "dining table"], ["laptop ON dining table"], "lab_desk_3")
+    event = event.model_copy(update={"timestamp": datetime(1970, 1, 1, 0, 4, 22, tzinfo=timezone.utc)})
+    before = datetime.now(timezone.utc)
+    result = pipeline.ingest(event)
+
+    assert result.event.timestamp >= before
+
+
+def test_where_is_x_leads_with_the_latest_sighting_and_says_how_long_ago():
+    from datetime import datetime, timedelta, timezone
+
+    import laptop.rag_query as rq
+
+    now = datetime.now(timezone.utc)
+    old = {"caption": "A laptop is left of the fridge.", "objects": "laptop, refrigerator",
+           "location_tag": "lab_desk_3", "timestamp": str(now - timedelta(hours=2))}
+    new = {"caption": "A laptop is on the table.", "objects": "laptop, dining table",
+           "location_tag": "lab_table", "timestamp": str(now - timedelta(seconds=90))}
+    other = {"caption": "A bottle is on the table.", "objects": "bottle, dining table",
+             "location_tag": "lab_table", "timestamp": str(now)}
+
+    # Retrieval ranked the old sighting first; the answer should still lead with the newest.
+    answer = rq.extractive_synthesize("where is the laptop?", [old, other, new])
+
+    assert answer.startswith("A laptop is on the table. Last seen at lab_table")
+    assert "(1 min ago)" in answer
+    assert "A laptop is left of the fridge." in answer  # still listed as supporting
+
+
+def test_a_removed_object_is_answered_as_gone_with_its_previous_sighting(pipeline):
+    from laptop.voice import spoken_answer
+
+    pipeline.ingest(_event(["bottle", "laptop"], ["bottle LEFT OF laptop"], "lab_table location 1"))
+    pipeline.ingest(_event(["laptop", "bottle"], ["laptop RIGHT OF bottle"], "lab_table location 2"))
+    missing = _event(["bottle"], [], "lab_table location 1", EventType.MISSING)
+    result = pipeline.ingest(missing)
+
+    assert result.action == "new"
+    assert result.caption == "The bottle was not found at lab_table location 1; it has been removed."
+
+    answer = pipeline.answer("where is the bottle?", k=4)
+    assert answer["answer"].startswith("The bottle was not found at lab_table location 1; it has been removed. Checked at")
+    assert "Before that it was seen at lab_table location 1" in answer["answer"]
+    assert "it was gone" in spoken_answer(answer)
+
+
+def test_seeing_a_removed_object_again_elsewhere_is_a_fresh_sighting_not_a_move(pipeline):
+    pipeline.ingest(_event(["bottle", "dining table"], ["bottle ON dining table"], "lab_table location 1"))
+    pipeline.ingest(_event(["bottle"], [], "lab_table location 1", EventType.MISSING))
+    result = pipeline.ingest(_event(["bottle", "dining table"], ["bottle ON dining table"], "kitchen"))
+
+    assert not result.moved

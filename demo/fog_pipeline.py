@@ -27,7 +27,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from laptop import embeddings
@@ -219,6 +219,14 @@ class FogPipeline:
 
     # -- ingest ------------------------------------------------------------
     def ingest(self, event: Event) -> IngestResult:
+        # A Jetson without network time boots believing it is 1970, and its
+        # events would then all read "last seen at 00:04". If the edge clock is
+        # clearly wrong, stamp the event with the time it reached the fog node.
+        now = datetime.now(timezone.utc)
+        stamp = event.timestamp if event.timestamp.tzinfo else event.timestamp.replace(tzinfo=timezone.utc)
+        if stamp.year < 2020 or stamp > now + timedelta(days=1):
+            event = event.model_copy(update={"timestamp": now})
+
         with self._lock:
             self.raw_events += 1
 

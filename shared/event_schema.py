@@ -21,6 +21,8 @@ class EventType(str, Enum):
     MOVED = "moved"
     PARTIAL_TIMEOUT = "partial_timeout"
     CONFIRMED = "confirmed"
+    # The robot went back to where it had confirmed the object and it was gone.
+    MISSING = "missing"
 
 
 class BBox(BaseModel):

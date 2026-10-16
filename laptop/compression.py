@@ -34,7 +34,9 @@ class Episode:
 def _episode_key(event: Event) -> tuple:
     """Episodes are keyed by the (unordered) object set, location, and
     relationship set — a re-observation of the same fact in the same place."""
-    return (tuple(sorted(event.objects)), event.location_tag, tuple(sorted(event.relationships)))
+    # "It is gone" must never be merged into an episode that says it is there.
+    missing = str(event.event_type) == "missing"
+    return (tuple(sorted(event.objects)), event.location_tag, tuple(sorted(event.relationships)), missing)
 
 
 class EpisodeCompressor:
