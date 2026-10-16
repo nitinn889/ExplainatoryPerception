@@ -30,6 +30,11 @@ class LocationTracker:
             return event
 
         subject = event.objects[0]
+        if str(event.event_type) == EventType.MISSING.value:
+            # Removed: no known location any more, so seeing it again anywhere
+            # is a fresh sighting rather than a "move".
+            self._last_location.pop(subject, None)
+            return event
         prior_location = self._last_location.get(subject)
         self._last_location[subject] = event.location_tag
 

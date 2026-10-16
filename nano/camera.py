@@ -46,7 +46,7 @@ class Camera:
 
     def __init__(
         self,
-        camera_type: str = "auto",  # 'csi', 'usb', 'synthetic', or 'auto'
+        camera_type: str = "auto",  # 'csi', 'usb', 'oak', 'synthetic', or 'auto'
         usb_device_index: int = 0,
         width: int = 640,
         height: int = 480,
@@ -61,6 +61,8 @@ class Camera:
         self.flip_method = flip_method
 
         self.cap: Optional[cv2.VideoCapture] = None
+        self._oak_device = None
+        self._oak_queue = None
         self.is_synthetic = False
         self._frame_count = 0
         self._synthetic_objects = []
@@ -70,6 +72,12 @@ class Camera:
     def _init_camera(self) -> None:
         if self.camera_type == "synthetic":
             self._setup_synthetic()
+            return
+
+        if self.camera_type == "oak":
+            # Explicit only, and no synthetic fallback: a missing OAK should
+            # fail loudly rather than feed the detector a blank grid.
+            self._init_oak()
             return
 
         if self.camera_type in ("csi", "auto"):
@@ -109,6 +117,29 @@ class Camera:
         logger.info("No physical CSI/USB camera detected. Falling back to synthetic frame generator.")
         self._setup_synthetic()
 
+    def _init_oak(self) -> None:
+        """Open a Luxonis OAK (e.g. OAK-D Lite) colour stream via depthai.
+
+        OAK cameras are not UVC devices, so cv2.VideoCapture cannot see them.
+        Only the RGB sensor is used; depth is not part of this pipeline.
+        """
+        import depthai as dai
+
+        pipeline = dai.Pipeline()
+        cam = pipeline.create(dai.node.ColorCamera)
+        cam.setPreviewSize(self.width, self.height)
+        cam.setInterleaved(False)
+        cam.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+        cam.setFps(self.framerate)
+        xout = pipeline.create(dai.node.XLinkOut)
+        xout.setStreamName("rgb")
+        cam.preview.link(xout.input)
+
+        self._oak_device = dai.Device(pipeline)
+        # maxSize=1, non-blocking: always hand the detector the newest frame.
+        self._oak_queue = self._oak_device.getOutputQueue("rgb", maxSize=1, blocking=False)
+        logger.info("Initialized OAK colour camera (%s) via depthai.", self._oak_device.getDeviceName())
+
     def _setup_synthetic(self) -> None:
         self.camera_type = "synthetic"
         self.is_synthetic = True
@@ -127,6 +158,9 @@ class Camera:
 
     def read(self) -> Tuple[bool, np.ndarray]:
         """Reads a frame. Returns (ret, frame) where frame is a BGR uint8 numpy array."""
+        if self._oak_queue is not None:
+            return True, self._oak_queue.get().getCvFrame()
+
         if self.is_synthetic or self.cap is None:
             self._frame_count += 1
             frame = np.full((self.height, self.width, 3), 40, dtype=np.uint8)
@@ -158,7 +192,7 @@ class Camera:
         return ret, frame
 
     def is_opened(self) -> bool:
-        if self.is_synthetic:
+        if self.is_synthetic or self._oak_queue is not None:
             return True
         return self.cap is not None and self.cap.isOpened()
 
@@ -166,6 +200,10 @@ class Camera:
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        if self._oak_device is not None:
+            self._oak_device.close()
+            self._oak_device = None
+            self._oak_queue = None
 
     def __enter__(self) -> Camera:
         return self

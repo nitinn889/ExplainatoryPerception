@@ -208,6 +208,9 @@ def spoken_answer(result: dict[str, Any], now: Optional[datetime] = None) -> str
 
     location = humanize_location(best.get("location_tag"))
     when = relative_time(best.get("timestamp"), now=now)
+    if str(best.get("event_type")) == "missing":
+        sentences.append(f"I checked {location or 'there'} {when or 'recently'} and it was gone.")
+        location = when = None
     if location and when:
         sentences.append(f"I last saw it at {location} {when}.")
     elif location:

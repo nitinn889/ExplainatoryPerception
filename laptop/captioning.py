@@ -40,6 +40,9 @@ def caption_for_relationship(relationship: str) -> str:
 
 def caption_from_event(event: Event) -> str:
     """Build a caption for a full event, honoring event_type."""
+    if event.event_type == EventType.MISSING or event.event_type == "missing":
+        subject = event.objects[0] if event.objects else "object"
+        return f"The {subject} was not found at {event.location_tag}; it has been removed."
     if not event.relationships:
         objects = ", ".join(event.objects) or "an object"
         base = f"Observed {objects}."

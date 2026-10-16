@@ -1,12 +1,15 @@
 """
-Low-level GPIO/PWM motor driver interface for the L298N (Phase 0).
+Low-level motor driver interface for the L298N (Phase 0).
 
 Exposes forward(duration_ms), reverse(duration_ms), turn_left(duration_ms),
 turn_right(duration_ms), stop() — short, fixed-duration pulses only
 (~150 ms default), never continuous/unbounded movement.
 
-Provides automatic fallback to a mock motor driver when Jetson.GPIO is not
-available (e.g., when developing or testing on a laptop/desktop).
+Three backends share that interface:
+- serial: an Arduino running arduino/motor_bridge/motor_bridge.ino drives the
+  L298N and takes commands over USB. Selected by passing serial_port.
+- gpio: the L298N is wired straight to the Jetson header (Jetson.GPIO).
+- mock: no hardware, used when developing or testing on a laptop/desktop.
 """
 
 from __future__ import annotations
@@ -23,6 +26,19 @@ try:
     HAVE_JETSON_GPIO = True
 except (ImportError, RuntimeError):
     HAVE_JETSON_GPIO = False
+
+# pyserial is only needed for the Arduino bridge backend
+try:
+    import serial
+except ImportError:
+    serial = None
+
+# First line the motor_bridge sketch prints on boot and in reply to "?"
+SERIAL_BANNER = "EPCAR"
+# One-letter commands understood by the motor_bridge sketch
+SERIAL_COMMANDS = {"forward": "F", "reverse": "B", "turn_left": "L", "turn_right": "R"}
+
+HIGH, LOW = 1, 0  # same values as GPIO.HIGH / GPIO.LOW
 
 
 class MotorController:
@@ -42,6 +58,9 @@ class MotorController:
         default_pulse_ms: int = 150,
         default_speed: int = 70,  # PWM duty cycle (0-100)
         force_mock: bool = False,
+        serial_port: Optional[str] = None,  # e.g. /dev/ttyUSB0 -> use the Arduino bridge
+        serial_baud: int = 115200,
+        camera_at_rear: bool = False,
     ):
         self.in1 = in1_pin
         self.in2 = in2_pin
@@ -51,16 +70,60 @@ class MotorController:
         self.enb = enb_pin
         self.default_pulse_ms = default_pulse_ms
         self.default_speed = default_speed
+        # Camera mounted facing backward: "forward" means toward what the camera
+        # sees, so the wheels run in reverse. Turns need no change - spinning
+        # in place rotates the view the same way whichever end the camera is on.
+        self.camera_at_rear = camera_at_rear
 
-        self.is_mock = force_mock or not HAVE_JETSON_GPIO
+        self.is_serial = serial_port is not None and not force_mock
+        self.is_mock = force_mock or not (self.is_serial or HAVE_JETSON_GPIO)
         self.action_history: List[Tuple[str, int]] = []
         self._pwm_a = None
         self._pwm_b = None
+        self._serial = None
 
         if self.is_mock:
             logger.info("Running in MOCK motor mode (no physical GPIO used).")
+        elif self.is_serial:
+            self._setup_serial(serial_port, serial_baud)
         else:
             self._setup_gpio()
+
+    def _setup_serial(self, port: str, baud: int) -> None:
+        # An explicitly requested port that does not answer is an error, not a
+        # reason to fall back to the mock: the robot would silently not move.
+        if serial is None:
+            raise RuntimeError("pyserial is not installed (pip install pyserial); needed for serial_port.")
+        self._serial = serial.Serial(port, baud, timeout=0.5)
+        # Opening the port resets an UNO, so wait for its boot banner. A board
+        # that does not auto-reset stays quiet; probe it once the bootloader
+        # window has passed.
+        start = time.time()
+        while time.time() - start < 6.0:
+            line = self._serial.readline().decode("ascii", "replace").strip()
+            if line.startswith(SERIAL_BANNER):
+                logger.info(f"Arduino motor bridge ready on {port} ({line}).")
+                return
+            if not line and time.time() - start > 2.5:
+                self._serial.write(b"?\n")
+        self._serial.close()
+        self._serial = None
+        raise RuntimeError(f"No motor bridge answered on {port}. Is motor_bridge.ino flashed and the baud {baud}?")
+
+    def _serial_command(self, line: str) -> bool:
+        """Sends one command line and checks the bridge acknowledged it."""
+        try:
+            self._serial.reset_input_buffer()
+            self._serial.write((line + "\n").encode("ascii"))
+            self._serial.flush()
+            reply = self._serial.readline().decode("ascii", "replace").strip()
+        except Exception as e:
+            logger.error(f"Motor bridge serial error on '{line}': {e}")
+            return False
+        if not reply.startswith("OK"):
+            logger.warning(f"Motor bridge did not acknowledge '{line}' (got '{reply}').")
+            return False
+        return True
 
     def _setup_gpio(self) -> None:
         try:
@@ -86,6 +149,14 @@ class MotorController:
             time.sleep(duration_sec)
             return
 
+        if self.is_serial:
+            # The Arduino times the pulse and stops the motors itself, so the
+            # chassis still stops if this process dies mid-pulse.
+            sent_at = time.time()
+            self._serial_command(f"{SERIAL_COMMANDS[action]} {max(duration_ms, 0)} {self.default_speed}")
+            time.sleep(max(0.0, duration_sec - (time.time() - sent_at)))
+            return
+
         try:
             # Set motor direction
             GPIO.output(self.in1, left_state[0])
@@ -98,31 +169,44 @@ class MotorController:
             self.stop()
 
     def forward(self, duration_ms: Optional[int] = None) -> None:
-        ms = duration_ms if duration_ms is not None else self.default_pulse_ms
-        # Left forward (HIGH, LOW), Right forward (HIGH, LOW)
-        self._pulse("forward", ms, (GPIO.HIGH if not self.is_mock else 1, GPIO.LOW if not self.is_mock else 0),
-                                   (GPIO.HIGH if not self.is_mock else 1, GPIO.LOW if not self.is_mock else 0))
+        if self.camera_at_rear:
+            return self._wheels_reverse(duration_ms)
+        self._wheels_forward(duration_ms)
 
     def reverse(self, duration_ms: Optional[int] = None) -> None:
+        if self.camera_at_rear:
+            return self._wheels_forward(duration_ms)
+        self._wheels_reverse(duration_ms)
+
+    def _wheels_forward(self, duration_ms: Optional[int] = None) -> None:
+        ms = duration_ms if duration_ms is not None else self.default_pulse_ms
+        # Left forward (HIGH, LOW), Right forward (HIGH, LOW)
+        self._pulse("forward", ms, (HIGH, LOW),
+                                   (HIGH, LOW))
+
+    def _wheels_reverse(self, duration_ms: Optional[int] = None) -> None:
         ms = duration_ms if duration_ms is not None else self.default_pulse_ms
         # Left reverse (LOW, HIGH), Right reverse (LOW, HIGH)
-        self._pulse("reverse", ms, (GPIO.LOW if not self.is_mock else 0, GPIO.HIGH if not self.is_mock else 1),
-                                   (GPIO.LOW if not self.is_mock else 0, GPIO.HIGH if not self.is_mock else 1))
+        self._pulse("reverse", ms, (LOW, HIGH),
+                                   (LOW, HIGH))
 
     def turn_left(self, duration_ms: Optional[int] = None) -> None:
         ms = duration_ms if duration_ms is not None else self.default_pulse_ms
         # Turn left in-place: Left reverse (LOW, HIGH), Right forward (HIGH, LOW)
-        self._pulse("turn_left", ms, (GPIO.LOW if not self.is_mock else 0, GPIO.HIGH if not self.is_mock else 1),
-                                     (GPIO.HIGH if not self.is_mock else 1, GPIO.LOW if not self.is_mock else 0))
+        self._pulse("turn_left", ms, (LOW, HIGH),
+                                     (HIGH, LOW))
 
     def turn_right(self, duration_ms: Optional[int] = None) -> None:
         ms = duration_ms if duration_ms is not None else self.default_pulse_ms
         # Turn right in-place: Left forward (HIGH, LOW), Right reverse (LOW, HIGH)
-        self._pulse("turn_right", ms, (GPIO.HIGH if not self.is_mock else 1, GPIO.LOW if not self.is_mock else 0),
-                                      (GPIO.LOW if not self.is_mock else 0, GPIO.HIGH if not self.is_mock else 1))
+        self._pulse("turn_right", ms, (HIGH, LOW),
+                                      (LOW, HIGH))
 
     def stop(self) -> None:
-        if not self.is_mock:
+        if self.is_serial:
+            if self._serial is not None:
+                self._serial_command("S")
+        elif not self.is_mock:
             try:
                 GPIO.output([self.in1, self.in2, self.in3, self.in4], GPIO.LOW)
             except Exception as e:
@@ -130,7 +214,11 @@ class MotorController:
 
     def cleanup(self) -> None:
         self.stop()
-        if not self.is_mock:
+        if self.is_serial:
+            if self._serial is not None:
+                self._serial.close()
+                self._serial = None
+        elif not self.is_mock:
             try:
                 if self._pwm_a:
                     self._pwm_a.stop()
