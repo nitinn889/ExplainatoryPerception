@@ -160,6 +160,9 @@ class StationRunner:
         event_client=None,
         location_tag: str = "lab_table",
         min_box_height: float = 0.0,
+        confirm_frames: int = 3,
+        rotate_deg: int = 0,
+        turn_only: bool = False,
     ):
         self.camera = camera
         self.detector = detector
@@ -187,6 +190,11 @@ class StationRunner:
         # apparent size. Boxes shorter than this fraction of the frame (distant
         # people, things on other benches) are ignored everywhere.
         self.min_box_height = min_box_height
+        self.confirm_frames = confirm_frames
+        self.turn_only = turn_only
+        self.rotate = {
+            0: None, 90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }[rotate_deg % 360]
         self.scene_builder = SceneGraphBuilder()
         self.confirmed_at: Dict[str, str] = {}  # station name -> time it was last confirmed
         self._last_detections: List = []
@@ -289,6 +297,10 @@ class StationRunner:
         ok, frame = self.camera.read()
         if not ok or frame is None:
             raise RuntimeError("camera returned no frame")
+        if self.rotate:
+            # A camera mounted upside down (or sideways): turn the picture
+            # upright before detection. 180 also restores image left/right.
+            frame = cv2.rotate(frame, self.rotate)
         return frame
 
     def _detect(self, target: Optional[str]) -> Tuple[object, List]:
@@ -374,10 +386,17 @@ class StationRunner:
             self.rough_turn(station.heading_deg)
         return False
 
+    @staticmethod
+    def _framing_only(detections: List) -> List:
+        """Turn-only: the car cannot get closer or back away, so being cut off
+        at the bottom or looking small cannot be fixed - judge left/right only."""
+        return [dataclasses.replace(d, bbox=(d.bbox[0], 0.3, d.bbox[2], 0.7)) for d in detections]
+
     def adjust(self, station: Station):
         sm = PerceptionActionStateMachine(
             pulse_ms=self.pulse_ms,
             timeout_sec=self.timeout_sec,
+            confirm_frames=self.confirm_frames,
             motor=self.motor,
             ignore_classes=None if station.target else SURFACE_CLASSES,
         )
@@ -386,7 +405,7 @@ class StationRunner:
         while time.time() < hard_stop:
             frame, wanted = self._detect(station.target)
             prev = sm.state
-            state, emitted = sm.step(wanted)
+            state, emitted = sm.step(self._framing_only(wanted) if self.turn_only else wanted)
             self.phase_state, self.phase_signal = state.value, f"adjust: {sm.last_signal.value}"
             if state != prev:
                 logger.info("  %s -> %s (%s)", prev.value, state.value, sm.last_signal.value)
@@ -443,7 +462,7 @@ class StationRunner:
             objects=[subject] + others,
             relationships=about,
             confidence=emitted.confidence,
-            event_type=EventType.CONFIRMED,
+            event_type=getattr(emitted, "event_type", EventType.CONFIRMED),
             bbox=emitted.bbox,
             location_tag=self.station_tag(station),
         ))
@@ -486,7 +505,9 @@ class StationRunner:
             outcome = "confirmed"
         target = emitted.target_object if emitted is not None else station.target
 
-        if outcome == "confirmed":
+        if emitted is not None:
+            # A timed-out adjust still saw the object here; either way it is
+            # remembered, so a later disappearance is caught as "removed".
             self.confirmed_at[station.name] = time.strftime("%H:%M:%S")
             self._report_confirmed(station, emitted)
         cx = self.center(station) if outcome == "confirmed" else None
@@ -552,6 +573,8 @@ def main() -> None:
     parser.add_argument("--camera-rear", action="store_true",
                         help="Camera faces backward over the battery box (swaps forward/reverse)")
     parser.add_argument("--mode", choices=["auto", "csi", "usb", "oak"], default="auto", help="Camera mode")
+    parser.add_argument("--rotate", type=int, default=0, choices=[0, 90, 180, 270],
+                        help="Rotate every frame clockwise by this much (180 for an upside-down camera)")
     parser.add_argument("--camera-index", type=int, default=0, help="V4L2 index for --mode usb (see --list-cameras)")
     parser.add_argument("--station", action="append", type=parse_station, default=[],
                         help="NAME=DEGREES[:class], e.g. 1=-60:cup (degrees clockwise from the start heading)")
@@ -577,6 +600,8 @@ def main() -> None:
                         help="NAME=SECONDS: pause after visiting that station, e.g. 2=15 to give time to move things")
     parser.add_argument("--min-box-height", type=float, default=0.2,
                         help="Ignore detections shorter than this fraction of the frame (= far away)")
+    parser.add_argument("--confirm-frames", type=int, default=3,
+                        help="Consecutive fully-visible frames needed to confirm (lower for weak detections)")
     parser.add_argument("--location-tag", default="lab_table",
                         help="Place name for memory; each station is logged as '<tag> location <name>'")
     parser.add_argument("--turn-only", action="store_true",
@@ -612,6 +637,7 @@ def main() -> None:
             camera, detector, MotorController(force_mock=True), 1.0,
             telemetry_url=f"{args.laptop_url.rstrip('/')}/telemetry",
             min_box_height=args.min_box_height,
+            rotate_deg=args.rotate,
         )
         runner.phase_signal, runner.phase_tag = "preview (motors off)", "preview"
         logger.info("Preview running; Ctrl+C to stop.")
@@ -649,6 +675,7 @@ def main() -> None:
             runner = StationRunner(
                 camera, None, TurnOnlyMotor(motor), args.deg_per_sec,
                 turn_chunk_ms=args.turn_chunk_ms, settle_sec=args.settle, hfov_deg=args.hfov or None,
+                rotate_deg=args.rotate,
             )
             try:
                 runner.rough_turn(args.turn_test)
@@ -680,6 +707,9 @@ def main() -> None:
             event_client=EventClient(server_url=args.laptop_url) if args.laptop_url else None,
             location_tag=args.location_tag,
             min_box_height=args.min_box_height,
+            confirm_frames=args.confirm_frames,
+            rotate_deg=args.rotate,
+            turn_only=args.turn_only,
         )
         waits = {k: float(v) for k, v in (w.split("=", 1) for w in args.wait)}
         results = []

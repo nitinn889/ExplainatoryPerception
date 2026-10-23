@@ -236,3 +236,23 @@ def test_alias_target_accepts_either_name_and_reports_the_first():
     result = runner.visit(Station("2", 0.0, "laptop|tv"))
     assert result.outcome == "confirmed"
     assert client.events[0].objects[0] == "laptop"
+
+
+def test_rotate_180_turns_the_frame_upright():
+    runner, world = make_runner({}, true_rate=100.0)
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    frame[0, 0] = 255  # marker in the top-left corner
+    world.read = lambda: (True, frame)
+    runner.rotate = cv2.ROTATE_180
+    out = runner._frame()
+    assert out[-1, -1].tolist() == [255, 255, 255]  # now bottom-right
+
+
+def test_turn_only_confirms_an_object_cut_off_at_the_bottom():
+    motor = MotorController(force_mock=True)
+    world = World(motor, {}, 100.0)
+    # Centred left/right but running off the bottom of the frame (too close).
+    world.detect = lambda frame, synthetic_objects=None: [DetectionResult("bottle", 0.8, (0.35, 0.2, 0.6, 1.0))]
+    runner = StationRunner(world, world, TurnOnlyMotor(motor), 100.0, settle_sec=0.0, timeout_sec=1.0, turn_only=True)
+    result = runner.visit(Station("1", 0.0, "bottle"))
+    assert result.outcome == "confirmed"
